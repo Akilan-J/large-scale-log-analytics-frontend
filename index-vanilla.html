@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EVOLVE — Adaptive Cloud Log Analytics</title>
+  
+  <!-- Typography & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- CSS Stylesheets -->
+  <link rel="stylesheet" href="src/css/variables.css">
+  <link rel="stylesheet" href="src/css/main.css">
+  <link rel="stylesheet" href="src/css/components.css">
+  <link rel="stylesheet" href="src/css/pages.css">
+  
+  <!-- Charts.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app">
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-toggle" id="sidebarToggle">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+    </div>
+    <div class="sidebar-brand">
+      <div class="brand-mark">E</div>
+      <div class="brand-name">EVOLVE</div>
+    </div>
+
+    <nav class="nav-section" style="flex:1;">
+      <div class="nav-label">Monitor</div>
+      <a class="nav-item active" data-page="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="9" rx="1.5"/>
+          <rect x="14" y="3" width="7" height="5" rx="1.5"/>
+          <rect x="14" y="12" width="7" height="9" rx="1.5"/>
+          <rect x="3" y="16" width="7" height="5" rx="1.5"/>
+        </svg>
+        <span class="label">Dashboard</span>
+      </a>
+      <a class="nav-item" data-page="sources">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 17V7a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>
+        </svg>
+        <span class="label">Log Sources</span>
+      </a>
+      <a class="nav-item" data-page="detection">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+        <span class="label">Detection Results</span>
+      </a>
+      <a class="nav-item" data-page="analytics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 3v18h18"/>
+          <path d="M7 14l4-4 3 3 5-6"/>
+        </svg>
+        <span class="label">Analytics</span>
+      </a>
+      <div class="nav-label" style="margin-top:8px;">System</div>
+      <a class="nav-item" data-page="models">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="6" cy="6" r="2.5"/>
+          <circle cx="6" cy="18" r="2.5"/>
+          <circle cx="18" cy="12" r="2.5"/>
+          <path d="M8 7l8 4M8 17l8-4"/>
+        </svg>
+        <span class="label">Model Management</span>
+      </a>
+      <a class="nav-item" data-page="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span class="label">Settings</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <div class="avatar">RK</div>
+        <div class="user-meta">
+          <div class="name">R. Kannan</div>
+          <div class="role">Security Analyst</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN COLUMN ================= -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb"><span id="crumbText" class="current">Dashboard</span></div>
+      <div class="topbar-right">
+        <div class="search-box">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input type="text" placeholder="Search logs, events, models...">
+          <span class="kbd">⌘K</span>
+        </div>
+        <div class="status-pill"><span class="pulse-dot"></span>Ingestion Live</div>
+        <button class="icon-btn" aria-label="View notifications">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="dot-badge"></span>
+        </button>
+        <div class="avatar" style="width:36px;height:36px;font-size:12px;">RK</div>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- ============================================================ -->
+      <!-- PAGE: DASHBOARD -->
+      <!-- ============================================================ -->
+      <section class="page active" id="page-dashboard">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Overview</div>
+            <div class="page-sub">Real-time system health across ingestion, detection, and model performance</div>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-secondary btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              New Log Source
+            </button>
+            <button class="btn btn-primary btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                <path d="M21 3v5h-5"/>
+              </svg>
+              Run Detection Scan
+            </button>
+          </div>
+        </div>
+
+        <!-- KPI Summary Cards -->
+        <div class="grid grid-4" style="margin-bottom:18px;">
+          <div class="card kpi-card hoverable">
+            <div class="kpi-icon" style="background:var(--primary-dim); color:var(--primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 6h16M4 12h16M4 18h10"/>
+              </svg>
+            </div>
+            <div class="kpi-label">Total Logs Processed</div>
+            <div class="kpi-value">18.42M</div>
+            <div class="kpi-delta up">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <path d="M17 7l-10 10M17 7H8M17 7v9"/>
+              </svg>
+              12.4% vs last 24h
+            </div>
+          </div>
+
+          <div class="card kpi-card hoverable">
+            <div class="kpi-icon" style="background:var(--danger-dim); color:var(--danger);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <path d="M12 9v4M12 17h.01"/>
+              </svg>
+            </div>
+            <div class="kpi-label">Anomalies Detected</div>
+            <div class="kpi-value">1,284</div>
+            <div class="kpi-delta down">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <path d="M17 17l-10-10M7 17h9M7 17v-9"/>
+              </svg>
+              3.1% vs last 24h
+            </div>
+          </div>
+
+          <div class="card kpi-card hoverable">
+            <div class="kpi-icon" style="background:rgba(34,211,238,0.12); color:var(--cyan);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="2.5"/>
+                <circle cx="6" cy="18" r="2.5"/>
+                <circle cx="18" cy="12" r="2.5"/>
+                <path d="M8 7l8 4M8 17l8-4"/>
+              </svg>
+            </div>
+            <div class="kpi-label">Current Model Version</div>
+            <div class="kpi-value">V2.3</div>
+            <div class="lineage-mini">
+              <div class="lin-node past"></div><div class="lin-line done"></div>
+              <div class="lin-node active"></div><div class="lin-line pending"></div>
+              <div class="lin-node candidate"></div>
+            </div>
+          </div>
+
+          <div class="card kpi-card hoverable">
+            <div class="kpi-icon" style="background:var(--success-dim); color:var(--success);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <path d="M22 4L12 14.01l-3-3"/>
+              </svg>
+            </div>
+            <div class="kpi-label">Model Status</div>
+            <div class="kpi-value" style="font-size:20px;">
+              Active <span class="badge badge-success" style="margin-left:4px;"><span class="badge-dot"></span>Healthy</span>
+            </div>
+            <div class="kpi-delta" style="color:var(--text-faint); font-weight:500;">Serving 100% of traffic</div>
+          </div>
+        </div>
+
+        <!-- Main Trend Chart & Activity Grid -->
+        <div class="grid grid-12" style="margin-bottom:18px;">
+          <div class="card card-pad col-8">
+            <div class="card-header">
+              <h3>Log Volume &amp; Anomalies — Last 14 Days</h3>
+              <div class="pill-tabs">
+                <div class="pill active">14D</div>
+                <div class="pill">30D</div>
+                <div class="pill">90D</div>
+              </div>
+            </div>
+            <div class="chart-box"><canvas id="chartVolume"></canvas></div>
+          </div>
+
+          <div class="card card-pad col-4">
+            <div class="card-header">
+              <h3>Recent Activity</h3>
+              <span class="card-meta">Live feed</span>
+            </div>
+            <div id="activityFeed"></div>
+          </div>
+        </div>
+
+        <!-- Bottom Stat Widgets -->
+        <div class="grid grid-3">
+          <div class="card card-pad">
+            <div class="card-header"><h3>Quick Statistics</h3></div>
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="text-md" style="font-size:12.5px;">Avg. detection latency</span>
+                <span class="mono text-hi" style="font-weight:600;">218ms</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="text-md" style="font-size:12.5px;">Active log sources</span>
+                <span class="mono text-hi" style="font-weight:600;">6 / 8</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="text-md" style="font-size:12.5px;">False positive rate</span>
+                <span class="mono text-success" style="font-weight:600;">2.1%</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="text-md" style="font-size:12.5px;">Storage utilization</span>
+                <span class="mono text-hi" style="font-weight:600;">64%</span>
+              </div>
+              <div class="pbar">
+                <div class="pbar-fill" style="width:64%; background:var(--primary);"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-header"><h3>Anomaly Severity Mix</h3></div>
+            <div class="chart-box sm"><canvas id="chartSeverityMini"></canvas></div>
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-header">
+              <h3>Model Evolution</h3>
+              <span class="badge badge-primary">Auto-optimizing</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-faint); margin-bottom:4px;">Current</div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px;">
+              <span class="mono" style="font-size:20px; font-weight:700;">V2.3</span>
+              <span class="badge badge-success"><span class="badge-dot"></span>Active</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px; font-size:12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="text-faint mono" style="width:26px;">V1</span>
+                <div class="pbar" style="flex:1;">
+                  <div class="pbar-fill" style="width:91%; background:var(--text-faint);"></div>
+                </div>
+                <span class="mono text-md">91%</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="text-cyan mono" style="width:26px;">V2.3</span>
+                <div class="pbar" style="flex:1;">
+                  <div class="pbar-fill" style="width:95%; background:var(--cyan);"></div>
+                </div>
+                <span class="mono text-md">95%</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="text-warning mono" style="width:26px;">V3</span>
+                <div class="pbar" style="flex:1;">
+                  <div class="pbar-fill" style="width:73%; background:var(--warning); opacity:.7;"></div>
+                </div>
+                <span class="mono text-md">96%*</span>
+              </div>
+            </div>
+            <div style="margin-top:12px; font-size:11.5px; color:var(--text-faint);">
+              Last optimized <span class="mono">2h ago</span> · V3 training <span class="mono">73%</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- PAGE: LOG SOURCES -->
+      <!-- ============================================================ -->
+      <section class="page" id="page-sources">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Log Sources</div>
+            <div class="page-sub">Upload log files and connect streaming sources for continuous ingestion</div>
+          </div>
+          <button class="btn btn-secondary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            Connect Source
+          </button>
+        </div>
+
+        <div class="grid grid-12" style="margin-bottom:18px;">
+          <!-- Left: Ingestion Dropzone -->
+          <div class="card card-pad col-4">
+            <div class="card-header"><h3>Upload Log File</h3></div>
+            <div class="dropzone" id="dropzone">
+              <div class="dropzone-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <path d="M17 8l-5-5-5 5"/>
+                  <path d="M12 3v12"/>
+                </svg>
+              </div>
+              <div style="font-weight:600; font-size:13.5px; margin-bottom:4px;">Drag &amp; drop log files</div>
+              <div style="font-size:12px; color:var(--text-faint); margin-bottom:14px;">.log, .json, .csv, .txt — up to 500MB</div>
+              <button class="btn btn-primary btn-sm" id="browseBtn">Browse Files</button>
+              <input type="file" id="fileInput" style="display:none;" multiple>
+            </div>
+            <!-- Uploading Slider -->
+            <div id="uploadProgressWrap" style="margin-top:14px; display:none;">
+              <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:6px;">
+                <span class="text-md" id="uploadFileName">cluster-auth.log</span>
+                <span class="mono text-faint" id="uploadPct">0%</span>
+              </div>
+              <div class="pbar">
+                <div class="pbar-fill" id="uploadBar" style="width:0%; background:var(--primary);"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Ingestion Connectors Grid -->
+          <div class="card card-pad col-8">
+            <div class="card-header"><h3>Supported Sources</h3><span class="card-meta">Future-ready connectors</span></div>
+            <div class="grid grid-2" style="gap:12px;">
+              <div class="source-tile">
+                <div class="source-icon" style="background:var(--primary-dim); color:var(--primary);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 17V7a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="row-title" style="font-size:13px;">Manual File Upload</div>
+                  <div style="font-size:11.5px; color:var(--text-faint);">Active · 6 files this week</div>
+                </div>
+                <span class="badge badge-success" style="margin-left:auto;">Enabled</span>
+              </div>
+
+              <div class="source-tile">
+                <div class="source-icon" style="background:rgba(34,211,238,0.12); color:var(--cyan);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 3v18h18"/>
+                    <path d="M7 14l4-4 3 3 5-6"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="row-title" style="font-size:13px;">AWS CloudWatch</div>
+                  <div style="font-size:11.5px; color:var(--text-faint);">Streaming · connected</div>
+                </div>
+                <span class="badge badge-success" style="margin-left:auto;">Enabled</span>
+              </div>
+
+              <div class="source-tile disabled">
+                <div class="source-icon" style="background:var(--bg); color:var(--text-faint);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="row-title" style="font-size:13px; color:var(--text-md);">Azure Monitor</div>
+                  <div style="font-size:11.5px; color:var(--text-faint);">Not connected</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" style="margin-left:auto;">Connect</button>
+              </div>
+
+              <div class="source-tile disabled">
+                <div class="source-icon" style="background:var(--bg); color:var(--text-faint);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="row-title" style="font-size:13px; color:var(--text-md);">GCP Logging</div>
+                  <div style="font-size:11.5px; color:var(--text-faint);">Not connected</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" style="margin-left:auto;">Connect</button>
+              </div>
+
+              <div class="source-tile disabled">
+                <div class="source-icon" style="background:var(--bg); color:var(--text-faint);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="row-title" style="font-size:13px; color:var(--text-md);">Kafka Stream</div>
+                  <div style="font-size:11.5px; color:var(--text-faint);">Not connected</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" style="margin-left:auto;">Connect</button>
+              </div>
+
+              <div class="source-tile disabled">
+                <div class="source-icon" style="background:var(--bg); color:var(--text-faint);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="row-title" style="font-size:13px; color:var(--text-md);">Syslog (RFC 5424)</div>
+                  <div style="font-size:11.5px; color:var(--text-faint);">Not connected</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" style="margin-left:auto;">Connect</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ingestion History Log -->
+        <div class="card">
+          <div class="card-pad" style="padding-bottom:0;">
+            <div class="card-header"><h3>Upload History</h3><span class="card-meta">42 files total</span></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>File Name</th>
+                  <th>Source</th>
+                  <th>Size</th>
+                  <th>Records</th>
+                  <th>Uploaded</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="uploadHistoryBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- PAGE: DETECTION RESULTS -->
+      <!-- ============================================================ -->
+      <section class="page" id="page-detection">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Detection Results</div>
+            <div class="page-sub">Anomaly classification output from model V2.3 across all ingested sources</div>
+          </div>
+          <button class="btn btn-secondary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <path d="M17 8l-5-5-5 5"/>
+              <path d="M12 3v12"/>
+            </svg>
+            Export CSV
+          </button>
+        </div>
+
+        <!-- Metric KPI Cards -->
+        <div class="grid grid-4" style="margin-bottom:18px;">
+          <div class="card kpi-card">
+            <div class="kpi-label">Total Logs Analyzed</div>
+            <div class="kpi-value">842,910</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">Normal Logs</div>
+            <div class="kpi-value text-success">841,626</div>
+            <div class="kpi-delta" style="color:var(--text-faint); font-weight:500;">99.85% of total</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">Anomalous Logs</div>
+            <div class="kpi-value text-danger">1,284</div>
+            <div class="kpi-delta" style="color:var(--text-faint); font-weight:500;">0.15% of total</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">Avg. Anomaly Score</div>
+            <div class="kpi-value text-warning">0.847</div>
+            <div class="kpi-delta" style="color:var(--text-faint); font-weight:500;">Threshold: 0.75</div>
+          </div>
+        </div>
+
+        <!-- Filter Toolbar & Events Grid -->
+        <div class="card" style="margin-bottom:18px;">
+          <div class="card-pad" style="padding-bottom:16px;">
+            <div class="card-header" style="margin-bottom:14px;"><h3>Detection Summary</h3></div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center;">
+              <div class="search-box" style="width:260px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <path d="M21 21l-4.35-4.35"/>
+                </svg>
+                <input type="text" id="detectionSearch" placeholder="Search event, component, IP...">
+              </div>
+              <div class="pill-tabs" id="severityFilter">
+                <div class="pill active" data-sev="all">All</div>
+                <div class="pill" data-sev="critical">Critical</div>
+                <div class="pill" data-sev="high">High</div>
+                <div class="pill" data-sev="medium">Medium</div>
+              </div>
+              <select style="margin-left:auto; background:var(--bg-raised); border:1px solid var(--border); color:var(--text-md); border-radius:8px; padding:8px 12px; font-size:12.5px;">
+                <option>Last 24 hours</option>
+                <option>Last 7 days</option>
+                <option>Last 30 days</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Event Type</th>
+                  <th>Component</th>
+                  <th>Anomaly Score</th>
+                  <th>Severity</th>
+                  <th>Source IP</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="detectionBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- PAGE: ANALYTICS -->
+      <!-- ============================================================ -->
+      <section class="page" id="page-analytics">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Analytics</div>
+            <div class="page-sub">Interactive visualizations for trend analysis and system-wide insight</div>
+          </div>
+          <div class="pill-tabs">
+            <div class="pill active">7D</div>
+            <div class="pill">30D</div>
+            <div class="pill">90D</div>
+          </div>
+        </div>
+
+        <div class="grid grid-12" style="margin-bottom:18px;">
+          <div class="card card-pad col-8">
+            <div class="card-header">
+              <h3>Anomalies Over Time</h3>
+              <span class="card-meta">Detected vs. Threshold</span>
+            </div>
+            <div class="chart-box"><canvas id="chartAnomalyTrend"></canvas></div>
+          </div>
+          <div class="card card-pad col-4">
+            <div class="card-header"><h3>Log Level Distribution</h3></div>
+            <div class="chart-box"><canvas id="chartLogLevel"></canvas></div>
+          </div>
+        </div>
+
+        <div class="grid grid-12" style="margin-bottom:18px;">
+          <div class="card card-pad col-4">
+            <div class="card-header"><h3>Event Type Distribution</h3></div>
+            <div class="chart-box sm"><canvas id="chartEventDist"></canvas></div>
+          </div>
+          <div class="card card-pad col-4">
+            <div class="card-header"><h3>Component Distribution</h3></div>
+            <div class="chart-box sm"><canvas id="chartComponentDist"></canvas></div>
+          </div>
+          <div class="card card-pad col-4">
+            <div class="card-header">
+              <h3>Processing Throughput</h3>
+              <span class="card-meta">logs / sec</span>
+            </div>
+            <div class="chart-box sm"><canvas id="chartThroughput"></canvas></div>
+          </div>
+        </div>
+
+        <div class="grid grid-12">
+          <div class="card card-pad col-12">
+            <div class="card-header">
+              <h3>Detection Trends by Component</h3>
+              <span class="card-meta">Stacked, last 7 days</span>
+            </div>
+            <div class="chart-box"><canvas id="chartDetectionTrend"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- PAGE: MODEL MANAGEMENT -->
+      <!-- ============================================================ -->
+      <section class="page" id="page-models">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Model Management</div>
+            <div class="page-sub">EVOLVE continuously trains, evaluates, and promotes candidate models</div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="deployBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19V5M5 12l7-7 7 7"/>
+            </svg>
+            Deploy New Model
+          </button>
+        </div>
+
+        <!-- Model Lineage Diagram -->
+        <div class="card lineage-hero" style="margin-bottom:18px;">
+          <div class="card-header" style="margin-bottom:0;">
+            <h3 style="font-size:14.5px;">Model Evolution Lineage</h3>
+            <span class="badge badge-primary">3 generations</span>
+          </div>
+          <div class="lineage-strand">
+            <!-- Populated dynamically by models.js -->
+          </div>
+          <div style="text-align:center; font-size:11.5px; color:var(--text-faint); margin-top:6px;">
+            *Provisional score on held-out validation set · Last optimized <span class="mono text-md">2 hours ago</span>
+          </div>
+        </div>
+
+        <!-- Deployed & Candidate Comparison Grid -->
+        <div class="grid grid-12" style="margin-bottom:18px;">
+          <div class="card card-pad col-6">
+            <div class="card-header">
+              <h3>Deployed Model — V2.3</h3>
+              <span class="badge badge-success"><span class="badge-dot"></span>Live</span>
+            </div>
+            <div class="grid grid-2" style="gap:14px;">
+              <div>
+                <div class="kpi-label">Accuracy</div>
+                <div class="mono" style="font-size:22px; font-weight:600;">95.4%</div>
+              </div>
+              <div>
+                <div class="kpi-label">Fitness Score</div>
+                <div class="mono" style="font-size:22px; font-weight:600;">0.928</div>
+              </div>
+              <div>
+                <div class="kpi-label">Detection Threshold</div>
+                <div class="mono" style="font-size:22px; font-weight:600;">0.750</div>
+              </div>
+              <div>
+                <div class="kpi-label">Deployed Since</div>
+                <div class="mono" style="font-size:15px; font-weight:600; padding-top:4px;">Jul 21, 2026</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-pad col-6">
+            <div class="card-header">
+              <h3>Candidate Model — V3</h3>
+              <span class="badge badge-warning">Training</span>
+            </div>
+            <div class="grid grid-2" style="gap:14px;">
+              <div>
+                <div class="kpi-label">Accuracy (val)</div>
+                <div class="mono" style="font-size:22px; font-weight:600; color:var(--warning);">96.1%</div>
+              </div>
+              <div>
+                <div class="kpi-label">Fitness Score</div>
+                <div class="mono" style="font-size:22px; font-weight:600; color:var(--warning);">0.941</div>
+              </div>
+              <div style="grid-column:span 2;">
+                <div class="kpi-label">Training Progress</div>
+                <div class="pbar" style="margin-top:8px;">
+                  <div class="pbar-fill" style="width:73%; background:var(--warning);"></div>
+                </div>
+                <div style="font-size:11.5px; color:var(--text-faint); margin-top:6px;">
+                  Epoch 146 / 200 · ETA 40 min
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- History & Timeline -->
+        <div class="grid grid-12">
+          <div class="card card-pad col-7">
+            <div class="card-header"><h3>Deployment History</h3></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Accuracy</th>
+                    <th>Fitness</th>
+                    <th>Deployed</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="deployHistoryBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card card-pad col-5">
+            <div class="card-header"><h3>Model Evolution Timeline</h3></div>
+            <div class="timeline" id="modelTimeline"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- PAGE: SETTINGS (FLESHED OUT) -->
+      <!-- ============================================================ -->
+      <section class="page" id="page-settings">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Settings</div>
+            <div class="page-sub">Workspace, alerting, and account preferences</div>
+          </div>
+        </div>
+
+        <div class="settings-layout">
+          <!-- Sidebar tabs -->
+          <nav class="settings-nav" id="settingsNav">
+            <div class="settings-nav-item active" data-pane="workspace">Workspace &amp; Team</div>
+            <div class="settings-nav-item" data-pane="alerting">Alerting Rules</div>
+            <div class="settings-nav-item" data-pane="apikeys">API Keys &amp; Integrations</div>
+            <div class="settings-nav-item" data-pane="account">Account</div>
+          </nav>
+          
+          <!-- Content panes -->
+          <div class="settings-panes" id="settingsPanes">
+            <!-- Dynamic settings pane forms are loaded here by settings.js -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ================= GLOBAL COMPONENTS ================= -->
+
+<!-- Deploy Modal Overlay -->
+<div class="modal-overlay" id="deployModal">
+  <div class="modal">
+    <h3>Deploy candidate model?</h3>
+    <p>Version <strong class="mono text-hi">V3</strong> will replace <strong class="mono text-hi">V2.3</strong> as the active detection model. Traffic shifts gradually over 30 minutes with automatic rollback if fitness drops below <strong class="mono">0.90</strong>.</p>
+    <div style="background:var(--bg-raised); border:1px solid var(--border); border-radius:8px; padding:12px 14px; font-size:12.5px; color:var(--text-md); margin-bottom:4px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+        <span>Validation accuracy</span>
+        <span class="mono text-warning">96.1%</span>
+      </div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>Training completion</span>
+        <span class="mono text-warning">100%</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="cancelDeploy">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="confirmDeploy">Confirm Deployment</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Notifications Alert -->
+<div class="toast" id="toast">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2">
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+    <path d="M22 4L12 14.01l-3-3"/>
+  </svg>
+  <div>
+    <div style="font-weight:600; font-size:13px;" id="toastTitle">Deployment started</div>
+    <div style="font-size:11.5px; color:var(--text-faint);" id="toastSub">V3 is rolling out gradually</div>
+  </div>
+</div>
+
+<!-- Dynamic sliding Detail Drawer Overlay -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="drawer" id="detailDrawer"></div>
+
+<!-- Application Main Scripts Entry -->
+<script type="module" src="src/js/app.js"></script>
+</body>
+</html>
