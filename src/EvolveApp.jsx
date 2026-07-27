@@ -1073,7 +1073,8 @@ export default function EvolveApp() {
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { margin: 0; padding: 0; background: ${C.bg}; width: 100%; height: 100%; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 8px; }
         select:focus, input:focus { outline: 2px solid ${C.cyan}; outline-offset: 1px; }
