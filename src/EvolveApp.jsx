@@ -13,7 +13,7 @@ import {
 /* ============================================================
    DESIGN TOKENS
    ============================================================ */
-const C = {
+const DARK_THEME = {
   bg: "#0A0E13", bgRaised: "#0D1219", card: "#121821", cardHover: "#161D27",
   border: "#1D2733", borderSoft: "#161E29",
   primary: "#3B82F6", primaryDim: "#1E3A66", cyan: "#22D3EE",
@@ -21,8 +21,52 @@ const C = {
   warning: "#F59E0B", warningDim: "#4A3608",
   danger: "#EF4444", dangerDim: "#4A1414",
   textHi: "#E6EDF3", textMd: "#B4C0CC", textLo: "#8A97A6", textFaint: "#5A6672",
+};
+
+const LIGHT_THEME = {
+  bg: "#F5F7FA", bgRaised: "#FFFFFF", card: "#FFFFFF", cardHover: "#F0F3F7",
+  border: "#DDE3EA", borderSoft: "#E7ECF1",
+  primary: "#2563EB", primaryDim: "#DCE7FC", cyan: "#0891B2",
+  success: "#059669", successDim: "#D1FAE5",
+  warning: "#D97706", warningDim: "#FEF3C7",
+  danger: "#DC2626", dangerDim: "#FEE2E2",
+  textHi: "#0F172A", textMd: "#3F4C5C", textLo: "#64748B", textFaint: "#94A3B8",
+};
+
+// Mutable in place (not reassigned) so components reading `C.x` at render
+// time pick up the new palette as soon as the app re-renders after a
+// system color-scheme change — see useSystemTheme() below.
+export const C = {
+  ...DARK_THEME,
   mono: "'IBM Plex Mono', monospace", sans: "'Inter', -apple-system, sans-serif",
 };
+
+function prefersLight() {
+  return typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: light)").matches
+    : false;
+}
+
+function applyTheme(isLight) {
+  Object.assign(C, isLight ? LIGHT_THEME : DARK_THEME);
+}
+applyTheme(prefersLight());
+
+// Re-applies the palette and forces a re-render whenever the OS/browser
+// color-scheme preference changes, so the whole app follows the system theme.
+export function useSystemTheme() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mql = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = (e) => {
+      applyTheme(e.matches);
+      setTick((t) => t + 1);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+}
 
 /* ============================================================
    MOCK DATA
@@ -412,10 +456,24 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
    TOPBAR
    ============================================================ */
 function Topbar({ pageTitle }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  let initials = "U";
+  try {
+    const user = JSON.parse(localStorage.getItem("evolve_user") || "null");
+    if (user?.name) initials = user.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+    else if (user?.email) initials = user.email[0].toUpperCase();
+  } catch {}
+
+  function handleLogout() {
+    localStorage.removeItem("evolve_token");
+    localStorage.removeItem("evolve_user");
+    window.location.reload();
+  }
+
   return (
     <header style={{
       height: 64, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "0 28px", borderBottom: `1px solid ${C.borderSoft}`, background: "rgba(10,14,19,0.85)",
+      padding: "0 28px", borderBottom: `1px solid ${C.borderSoft}`, background: C.bgRaised,
       backdropFilter: "blur(8px)", position: "sticky", top: 0, zIndex: 30,
     }}>
       <div style={{ fontSize: 15, fontWeight: 600, color: C.textHi }}>{pageTitle}</div>
@@ -432,7 +490,30 @@ function Topbar({ pageTitle }) {
           <Bell size={17} />
           <span style={{ position: "absolute", top: 7, right: 7, width: 7, height: 7, borderRadius: "50%", background: C.danger, boxShadow: `0 0 0 2px ${C.card}` }} />
         </div>
-        <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#2a3f5f,#1a2634)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: C.cyan }}>RK</div>
+        <div style={{ position: "relative" }}>
+          <div
+            onClick={() => setMenuOpen((v) => !v)}
+            style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#2a3f5f,#1a2634)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: C.cyan, cursor: "pointer" }}
+          >
+            {initials}
+          </div>
+          {menuOpen && (
+            <div style={{
+              position: "absolute", right: 0, top: 44, background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 8, boxShadow: C.shadowMd || "0 12px 40px rgba(0,0,0,0.3)", overflow: "hidden", minWidth: 120, zIndex: 40,
+            }}>
+              <button
+                onClick={handleLogout}
+                style={{
+                  width: "100%", padding: "10px 14px", background: "transparent", border: "none",
+                  color: C.textHi, fontSize: 13, textAlign: "left", cursor: "pointer",
+                }}
+              >
+                Log out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );
@@ -1055,6 +1136,7 @@ function Toast({ title, sub }) {
    APP SHELL
    ============================================================ */
 export default function EvolveApp() {
+  useSystemTheme();
   const [page, setPage] = useState("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
