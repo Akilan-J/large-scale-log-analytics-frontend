@@ -202,6 +202,43 @@ function bold(text) {
   );
 }
 
+/* ============================================================
+   LOGO
+   A double helix — the genetic algorithm at the core of the
+   product — with its base pairs drawn as data nodes. Two strands
+   meet at top, middle and bottom so the shape stays readable
+   once it is scaled down to the 30px sidebar tile.
+   ============================================================ */
+export function Logo({ size = 30, radius = 8 }) {
+  const inner = Math.round(size * 0.64);
+  return (
+    <div
+      role="img"
+      aria-label="EVOLVE"
+      style={{
+        width: size, height: size, flexShrink: 0, borderRadius: radius,
+        background: `linear-gradient(135deg, ${C.primary}, ${C.cyan})`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      <svg width={inner} height={inner} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        {/* Two strands crossing at top, middle and bottom. The amplitude runs
+            nearly the full width so the mark still holds its shape at 30px —
+            a narrower helix collapses into a chain-link blob. */}
+        <g stroke="#04141d" strokeWidth="2.1" strokeLinecap="round">
+          <path d="M12 2.5 C19.5 6, 19.5 9, 12 12.5 C4.5 16, 4.5 19, 12 22.5" />
+          <path d="M12 2.5 C4.5 6, 4.5 9, 12 12.5 C19.5 16, 19.5 19, 12 22.5" />
+        </g>
+        {/* base pairs, where the strands sit widest apart */}
+        <g stroke="#04141d" strokeWidth="1.7" strokeLinecap="round" opacity="0.85">
+          <path d="M7.6 7.2 H16.4" />
+          <path d="M7.6 17.8 H16.4" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 function Badge({ children, tone = "neutral", dot = false }) {
   const tones = {
     success: { bg: C.successDim, fg: "#4ADE9A", bd: "rgba(16,185,129,.3)" },
@@ -404,12 +441,7 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
       </div>
 
       <div style={{ height: 64, display: "flex", alignItems: "center", gap: 12, padding: "0 20px", borderBottom: `1px solid ${C.borderSoft}`, whiteSpace: "nowrap", overflow: "hidden" }}>
-        <div style={{
-          width: 30, height: 30, flexShrink: 0, borderRadius: 8,
-          background: `linear-gradient(135deg, ${C.primary}, ${C.cyan})`,
-          display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, color: "#03131a",
-        }}>E</div>
-        <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: ".3px", opacity: expanded ? 1 : 0, transition: "opacity .15s" }}>EVOLVE</div>
+        <Logo size={30} />
       </div>
 
       <nav style={{ padding: "16px 12px", flex: 1 }}>

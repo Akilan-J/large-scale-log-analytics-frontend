@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { Logo } from "./EvolveApp.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
@@ -80,14 +80,7 @@ export default function LoginPage({ colors: C, onAuthenticated }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-          <div
-            style={{
-              width: 36, height: 36, borderRadius: 8, background: C.primaryDim,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <ShieldCheck size={20} color={C.primary} />
-          </div>
+          <Logo size={36} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 16 }}>EVOLVE</div>
             <div style={{ fontSize: 12, color: C.textLo }}>Cloud Log Analytics</div>
