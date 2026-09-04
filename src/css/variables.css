@@ -28,6 +28,34 @@
   --shadow-lg: 0 12px 40px rgba(0,0,0,0.45);
 }
 
+/* Follows the OS/browser color-scheme preference automatically. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #F5F7FA;
+    --bg-raised: #FFFFFF;
+    --card: #FFFFFF;
+    --card-hover: #F0F3F7;
+    --border: #DDE3EA;
+    --border-soft: #E7ECF1;
+    --primary: #2563EB;
+    --primary-dim: #DCE7FC;
+    --cyan: #0891B2;
+    --success: #059669;
+    --success-dim: #D1FAE5;
+    --warning: #D97706;
+    --warning-dim: #FEF3C7;
+    --danger: #DC2626;
+    --danger-dim: #FEE2E2;
+    --text-hi: #0F172A;
+    --text-md: #3F4C5C;
+    --text-lo: #64748B;
+    --text-faint: #94A3B8;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+    --shadow-md: 0 4px 16px rgba(15,23,42,0.08), 0 1px 3px rgba(15,23,42,0.06);
+    --shadow-lg: 0 12px 40px rgba(15,23,42,0.12);
+  }
+}
+
 /* ============================= GLOBAL RESET ============================= */
 * {
   box-sizing: border-box;
