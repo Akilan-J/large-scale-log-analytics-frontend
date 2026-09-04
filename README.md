@@ -1,6 +1,6 @@
-# EVOLVE Adaptive Cloud Log Analytics Dashboard
+# MorphGuard Adaptive Cloud Log Analytics Dashboard
 
-EVOLVE is a high-fidelity interactive dashboard for cloud log analytics and anomaly detection. This is the **frontend specification prototype** built using React, Recharts, Lucide Icons, and Vite.
+MorphGuard is a high-fidelity interactive dashboard for cloud log analytics and anomaly detection. This is the **frontend specification prototype** built using React, Recharts, Lucide Icons, and Vite.
 
 All data, training cycles, file uploads, and model deployment loops are currently mock-simulated locally to demonstrate visual layout, user navigation flows, and components.
 
@@ -40,8 +40,8 @@ npm run build
 - `src/`
   - `main.jsx` - Mounting script loading React DOM client, gating the dashboard behind the login screen.
   - `LoginPage.jsx` - Sign in / sign up screen backed by the auth API.
-  - `EvolveApp.jsx` - Primary monolithic React application shell housing local mock states, sidebar routing, sub-pages (Dashboard, Log Sources, Detection, Analytics, Model Management, Settings), charts, modal dialogs, and slide-out details drawers.
-- `EVOLVE-design-system.md` - Companion spec outlining colors, typography hierarchy, and UX flows.
+  - `MorphGuardApp.jsx` - Primary monolithic React application shell housing local mock states, sidebar routing, sub-pages (Dashboard, Log Sources, Detection, Analytics, Model Management, Settings), charts, modal dialogs, and slide-out details drawers.
+- `MorphGuard-design-system.md` - Companion spec outlining colors, typography hierarchy, and UX flows.
 
 All styling lives in the components themselves (inline styles plus a small
 injected `<style>` block), so there are no separate stylesheet files.

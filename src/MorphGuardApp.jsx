@@ -214,7 +214,7 @@ export function Logo({ size = 30, radius = 8 }) {
   return (
     <div
       role="img"
-      aria-label="EVOLVE"
+      aria-label="MorphGuard"
       style={{
         width: size, height: size, flexShrink: 0, borderRadius: radius,
         background: `linear-gradient(135deg, ${C.primary}, ${C.cyan})`,
@@ -491,14 +491,14 @@ function Topbar({ pageTitle }) {
   const [menuOpen, setMenuOpen] = useState(false);
   let initials = "U";
   try {
-    const user = JSON.parse(localStorage.getItem("evolve_user") || "null");
+    const user = JSON.parse(localStorage.getItem("mg_user") || "null");
     if (user?.name) initials = user.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
     else if (user?.email) initials = user.email[0].toUpperCase();
   } catch {}
 
   function handleLogout() {
-    localStorage.removeItem("evolve_token");
-    localStorage.removeItem("evolve_user");
+    localStorage.removeItem("mg_token");
+    localStorage.removeItem("mg_user");
     window.location.reload();
   }
 
@@ -996,7 +996,7 @@ function ModelsPage() {
 
   return (
     <div>
-      <PageHeader title="Model Management" sub="EVOLVE continuously trains, evaluates, and promotes candidate models"
+      <PageHeader title="Model Management" sub="MorphGuard continuously trains, evaluates, and promotes candidate models"
         right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)}>Deploy New Model</Button>} />
 
       {/* Signature: lineage strand */}
@@ -1167,7 +1167,7 @@ function Toast({ title, sub }) {
 /* ============================================================
    APP SHELL
    ============================================================ */
-export default function EvolveApp() {
+export default function MorphGuardApp() {
   useSystemTheme();
   const [page, setPage] = useState("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -1193,7 +1193,7 @@ export default function EvolveApp() {
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 8px; }
         select:focus, input:focus { outline: 2px solid ${C.cyan}; outline-offset: 1px; }
         @media (max-width: 1180px) {
-          .evolve-grid-4 { grid-template-columns: repeat(2,1fr) !important; }
+          .mg-grid-4 { grid-template-columns: repeat(2,1fr) !important; }
         }
       `}</style>
 

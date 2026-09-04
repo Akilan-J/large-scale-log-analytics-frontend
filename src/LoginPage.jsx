@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Logo } from "./EvolveApp.jsx";
+import { Logo } from "./MorphGuardApp.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
@@ -26,8 +26,8 @@ export default function LoginPage({ colors: C, onAuthenticated }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
 
-      localStorage.setItem("evolve_token", data.token);
-      localStorage.setItem("evolve_user", JSON.stringify(data.user));
+      localStorage.setItem("mg_token", data.token);
+      localStorage.setItem("mg_user", JSON.stringify(data.user));
       onAuthenticated(data.user);
     } catch (err) {
       setError(err.message || "Unable to reach the server.");
