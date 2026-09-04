@@ -38,9 +38,10 @@ npm run build
 - `package.json` - Node package dependencies and npm script hooks.
 - `vite.config.js` - Configuration plugin mapping for Vite and React.
 - `src/`
-  - `main.jsx` - Mounting script loading React DOM client.
+  - `main.jsx` - Mounting script loading React DOM client, gating the dashboard behind the login screen.
+  - `LoginPage.jsx` - Sign in / sign up screen backed by the auth API.
   - `EvolveApp.jsx` - Primary monolithic React application shell housing local mock states, sidebar routing, sub-pages (Dashboard, Log Sources, Detection, Analytics, Model Management, Settings), charts, modal dialogs, and slide-out details drawers.
-  - `css/` - CSS files containing legacy vanilla token variables, layout chrome, and component definitions.
-  - `js/` - Archive folders containing legacy vanilla coordination scripts.
-- `index-vanilla.html` - Backed up vanilla JS/HTML prototype.
 - `EVOLVE-design-system.md` - Companion spec outlining colors, typography hierarchy, and UX flows.
+
+All styling lives in the components themselves (inline styles plus a small
+injected `<style>` block), so there are no separate stylesheet files.
