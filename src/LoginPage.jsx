@@ -81,10 +81,7 @@ export default function LoginPage({ colors: C, onAuthenticated }) {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
           <Logo size={36} />
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>EVOLVE</div>
-            <div style={{ fontSize: 12, color: C.textLo }}>Cloud Log Analytics</div>
-          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textMd }}>Cloud Log Analytics</div>
         </div>
 
         <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>
