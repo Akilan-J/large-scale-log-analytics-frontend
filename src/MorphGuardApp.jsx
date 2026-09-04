@@ -442,6 +442,7 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
 
       <div style={{ height: 64, display: "flex", alignItems: "center", gap: 12, padding: "0 20px", borderBottom: `1px solid ${C.borderSoft}`, whiteSpace: "nowrap", overflow: "hidden" }}>
         <Logo size={30} />
+        <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: ".2px", opacity: expanded ? 1 : 0, transition: "opacity .15s" }}>MorphGuard</div>
       </div>
 
       <nav style={{ padding: "16px 12px", flex: 1 }}>
