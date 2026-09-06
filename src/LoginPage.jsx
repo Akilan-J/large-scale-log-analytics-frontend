@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { Logo } from "./MorphGuardApp.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
@@ -26,8 +26,8 @@ export default function LoginPage({ colors: C, onAuthenticated }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
 
-      localStorage.setItem("evolve_token", data.token);
-      localStorage.setItem("evolve_user", JSON.stringify(data.user));
+      localStorage.setItem("mg_token", data.token);
+      localStorage.setItem("mg_user", JSON.stringify(data.user));
       onAuthenticated(data.user);
     } catch (err) {
       setError(err.message || "Unable to reach the server.");
@@ -80,18 +80,8 @@ export default function LoginPage({ colors: C, onAuthenticated }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-          <div
-            style={{
-              width: 36, height: 36, borderRadius: 8, background: C.primaryDim,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <ShieldCheck size={20} color={C.primary} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>EVOLVE</div>
-            <div style={{ fontSize: 12, color: C.textLo }}>Cloud Log Analytics</div>
-          </div>
+          <Logo size={36} />
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textMd }}>Cloud Log Analytics</div>
         </div>
 
         <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>
