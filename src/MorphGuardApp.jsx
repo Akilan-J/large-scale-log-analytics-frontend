@@ -10,9 +10,6 @@ import {
   Tooltip, Legend, PieChart, Pie, Cell, LineChart, AreaChart, Area, BarChart
 } from "recharts";
 
-/* ============================================================
-   DESIGN TOKENS
-   ============================================================ */
 const DARK_THEME = {
   bg: "#0A0E13", bgRaised: "#0D1219", card: "#121821", cardHover: "#161D27",
   border: "#1D2733", borderSoft: "#161E29",
@@ -33,9 +30,6 @@ const LIGHT_THEME = {
   textHi: "#0F172A", textMd: "#3F4C5C", textLo: "#64748B", textFaint: "#94A3B8",
 };
 
-// Mutable in place (not reassigned) so components reading `C.x` at render
-// time pick up the new palette as soon as the app re-renders after a
-// system color-scheme change — see useSystemTheme() below.
 export const C = {
   ...DARK_THEME,
   mono: "'IBM Plex Mono', monospace", sans: "'Inter', -apple-system, sans-serif",
@@ -52,8 +46,6 @@ function applyTheme(isLight) {
 }
 applyTheme(prefersLight());
 
-// Re-applies the palette and forces a re-render whenever the OS/browser
-// color-scheme preference changes, so the whole app follows the system theme.
 export function useSystemTheme() {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -68,9 +60,6 @@ export function useSystemTheme() {
   }, []);
 }
 
-/* ============================================================
-   MOCK DATA
-   ============================================================ */
 const activity = [
   { c: C.danger, text: "Critical anomaly detected in **auth-service** — score 0.94", t: "2 min ago" },
   { c: C.primary, text: "Ingested 42,118 records from **cluster-auth.log**", t: "8 min ago" },
@@ -191,12 +180,6 @@ const titles = {
   analytics: "Analytics", models: "Model Management", settings: "Settings",
 };
 
-/* ============================================================
-   SMALL HELPERS / PRIMITIVES
-   ============================================================ */
-/* ============================================================
-   SESSION
-   ============================================================ */
 function currentUser() {
   try {
     return JSON.parse(localStorage.getItem("mg_user") || "null");
@@ -205,7 +188,6 @@ function currentUser() {
   }
 }
 
-// "Akilan J" -> "AJ";  falls back to the email's first letter, then "U".
 function initialsOf(user) {
   if (user?.name?.trim()) {
     return user.name.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -214,7 +196,6 @@ function initialsOf(user) {
   return "U";
 }
 
-// The account's display name, falling back to the local part of the email.
 function displayName(user) {
   if (user?.name?.trim()) return user.name.trim();
   if (user?.email) return user.email.split("@")[0];
@@ -222,20 +203,12 @@ function displayName(user) {
 }
 
 function bold(text) {
-  // renders **word** as <strong>, used only for the mock activity feed copy
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((p, i) =>
     p.startsWith("**") ? <strong key={i} style={{ color: C.textHi }}>{p.slice(2, -2)}</strong> : p
   );
 }
 
-/* ============================================================
-   LOGO
-   A double helix — the genetic algorithm at the core of the
-   product — with its base pairs drawn as data nodes. Two strands
-   meet at top, middle and bottom so the shape stays readable
-   once it is scaled down to the 30px sidebar tile.
-   ============================================================ */
 export function Logo({ size = 30, radius = 8 }) {
   const inner = Math.round(size * 0.64);
   return (
@@ -249,14 +222,10 @@ export function Logo({ size = 30, radius = 8 }) {
       }}
     >
       <svg width={inner} height={inner} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        {/* Two strands crossing at top, middle and bottom. The amplitude runs
-            nearly the full width so the mark still holds its shape at 30px —
-            a narrower helix collapses into a chain-link blob. */}
         <g stroke="#04141d" strokeWidth="2.1" strokeLinecap="round">
           <path d="M12 2.5 C19.5 6, 19.5 9, 12 12.5 C4.5 16, 4.5 19, 12 22.5" />
           <path d="M12 2.5 C4.5 6, 4.5 9, 12 12.5 C19.5 16, 19.5 19, 12 22.5" />
         </g>
-        {/* base pairs, where the strands sit widest apart */}
         <g stroke="#04141d" strokeWidth="1.7" strokeLinecap="round" opacity="0.85">
           <path d="M7.6 7.2 H16.4" />
           <path d="M7.6 17.8 H16.4" />
@@ -447,9 +416,6 @@ function Row({ children }) {
   );
 }
 
-/* ============================================================
-   SIDEBAR
-   ============================================================ */
 function Sidebar({ active, setActive, expanded, setExpanded }) {
   const user = currentUser();
   return (
@@ -513,9 +479,6 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
   );
 }
 
-/* ============================================================
-   TOPBAR
-   ============================================================ */
 function Topbar({ pageTitle }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const initials = initialsOf(currentUser());
@@ -575,9 +538,6 @@ function Topbar({ pageTitle }) {
   );
 }
 
-/* ============================================================
-   PAGE: DASHBOARD
-   ============================================================ */
 function DashboardPage() {
   return (
     <div>
@@ -732,12 +692,9 @@ function PageHeader({ title, sub, right }) {
   );
 }
 
-/* ============================================================
-   PAGE: LOG SOURCES
-   ============================================================ */
 function SourcesPage() {
   const [dragOver, setDragOver] = useState(false);
-  const [upload, setUpload] = useState(null); // { name, pct }
+  const [upload, setUpload] = useState(null);
   const fileRef = useRef(null);
   const [toast, setToast] = useState(null);
 
@@ -839,9 +796,6 @@ function SourcesPage() {
   );
 }
 
-/* ============================================================
-   PAGE: DETECTION RESULTS
-   ============================================================ */
 function DetectionPage() {
   const [search, setSearch] = useState("");
   const [sev, setSev] = useState("all");
@@ -910,9 +864,6 @@ function DetectionPage() {
   );
 }
 
-/* ============================================================
-   PAGE: ANALYTICS
-   ============================================================ */
 function AnalyticsPage() {
   const [range, setRange] = useState("7d");
   return (
@@ -1005,9 +956,6 @@ function AnalyticsPage() {
   );
 }
 
-/* ============================================================
-   PAGE: MODEL MANAGEMENT
-   ============================================================ */
 function ModelsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
@@ -1023,7 +971,6 @@ function ModelsPage() {
       <PageHeader title="Model Management" sub="MorphGuard continuously trains, evaluates, and promotes candidate models"
         right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)}>Deploy New Model</Button>} />
 
-      {/* Signature: lineage strand */}
       <Card style={{ padding: "28px 26px 20px", marginBottom: 18 }}>
         <CardHeader title="Model Evolution Lineage" right={<Badge tone="primary">3 generations</Badge>} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "40px 10px 10px" }}>
@@ -1153,9 +1100,6 @@ function MetricBlock({ label, value, color, small }) {
   );
 }
 
-/* ============================================================
-   PAGE: SETTINGS (stub)
-   ============================================================ */
 function SettingsPage() {
   return (
     <div>
@@ -1169,9 +1113,6 @@ function SettingsPage() {
   );
 }
 
-/* ============================================================
-   TOAST
-   ============================================================ */
 function Toast({ title, sub }) {
   return (
     <div style={{
@@ -1188,9 +1129,6 @@ function Toast({ title, sub }) {
   );
 }
 
-/* ============================================================
-   APP SHELL
-   ============================================================ */
 export default function MorphGuardApp() {
   useSystemTheme();
   const [page, setPage] = useState("dashboard");

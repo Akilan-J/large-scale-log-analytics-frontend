@@ -4,7 +4,7 @@ import { Logo } from "./MorphGuardApp.jsx";
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
 export default function LoginPage({ colors: C, onAuthenticated }) {
-  const [mode, setMode] = useState("login"); // "login" | "register"
+  const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
