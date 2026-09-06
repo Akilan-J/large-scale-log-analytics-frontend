@@ -194,6 +194,33 @@ const titles = {
 /* ============================================================
    SMALL HELPERS / PRIMITIVES
    ============================================================ */
+/* ============================================================
+   SESSION
+   ============================================================ */
+function currentUser() {
+  try {
+    return JSON.parse(localStorage.getItem("mg_user") || "null");
+  } catch {
+    return null;
+  }
+}
+
+// "Akilan J" -> "AJ";  falls back to the email's first letter, then "U".
+function initialsOf(user) {
+  if (user?.name?.trim()) {
+    return user.name.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  }
+  if (user?.email) return user.email[0].toUpperCase();
+  return "U";
+}
+
+// The account's display name, falling back to the local part of the email.
+function displayName(user) {
+  if (user?.name?.trim()) return user.name.trim();
+  if (user?.email) return user.email.split("@")[0];
+  return "Signed in";
+}
+
 function bold(text) {
   // renders **word** as <strong>, used only for the mock activity feed copy
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
@@ -214,7 +241,7 @@ export function Logo({ size = 30, radius = 8 }) {
   return (
     <div
       role="img"
-      aria-label="EVOLVE"
+      aria-label="MorphGuard"
       style={{
         width: size, height: size, flexShrink: 0, borderRadius: radius,
         background: `linear-gradient(135deg, ${C.primary}, ${C.cyan})`,
@@ -424,6 +451,7 @@ function Row({ children }) {
    SIDEBAR
    ============================================================ */
 function Sidebar({ active, setActive, expanded, setExpanded }) {
+  const user = currentUser();
   return (
     <aside style={{
       width: expanded ? 232 : 72, flexShrink: 0, background: C.bgRaised, borderRight: `1px solid ${C.borderSoft}`,
@@ -442,6 +470,7 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
 
       <div style={{ height: 64, display: "flex", alignItems: "center", gap: 12, padding: "0 20px", borderBottom: `1px solid ${C.borderSoft}`, whiteSpace: "nowrap", overflow: "hidden" }}>
         <Logo size={30} />
+        <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: ".2px", opacity: expanded ? 1 : 0, transition: "opacity .15s" }}>MorphGuard</div>
       </div>
 
       <nav style={{ padding: "16px 12px", flex: 1 }}>
@@ -473,10 +502,10 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
 
       <div style={{ marginTop: "auto", padding: 12, borderTop: `1px solid ${C.borderSoft}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8 }}>
-          <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg,#2a3f5f,#1a2634)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: C.cyan }}>RK</div>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg,#2a3f5f,#1a2634)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: C.cyan }}>{initialsOf(user)}</div>
           <div style={{ opacity: expanded ? 1 : 0, transition: "opacity .15s", overflow: "hidden", whiteSpace: "nowrap" }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textHi }}>R. Kannan</div>
-            <div style={{ fontSize: 11, color: C.textFaint }}>Security Analyst</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textHi, textOverflow: "ellipsis", overflow: "hidden" }}>{displayName(user)}</div>
+            <div style={{ fontSize: 11, color: C.textFaint, textOverflow: "ellipsis", overflow: "hidden" }}>{user?.email}</div>
           </div>
         </div>
       </div>
@@ -489,16 +518,11 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
    ============================================================ */
 function Topbar({ pageTitle }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  let initials = "U";
-  try {
-    const user = JSON.parse(localStorage.getItem("evolve_user") || "null");
-    if (user?.name) initials = user.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-    else if (user?.email) initials = user.email[0].toUpperCase();
-  } catch {}
+  const initials = initialsOf(currentUser());
 
   function handleLogout() {
-    localStorage.removeItem("evolve_token");
-    localStorage.removeItem("evolve_user");
+    localStorage.removeItem("mg_token");
+    localStorage.removeItem("mg_user");
     window.location.reload();
   }
 
@@ -996,7 +1020,7 @@ function ModelsPage() {
 
   return (
     <div>
-      <PageHeader title="Model Management" sub="EVOLVE continuously trains, evaluates, and promotes candidate models"
+      <PageHeader title="Model Management" sub="MorphGuard continuously trains, evaluates, and promotes candidate models"
         right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)}>Deploy New Model</Button>} />
 
       {/* Signature: lineage strand */}
@@ -1167,7 +1191,7 @@ function Toast({ title, sub }) {
 /* ============================================================
    APP SHELL
    ============================================================ */
-export default function EvolveApp() {
+export default function MorphGuardApp() {
   useSystemTheme();
   const [page, setPage] = useState("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -1193,7 +1217,7 @@ export default function EvolveApp() {
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 8px; }
         select:focus, input:focus { outline: 2px solid ${C.cyan}; outline-offset: 1px; }
         @media (max-width: 1180px) {
-          .evolve-grid-4 { grid-template-columns: repeat(2,1fr) !important; }
+          .mg-grid-4 { grid-template-columns: repeat(2,1fr) !important; }
         }
       `}</style>
 

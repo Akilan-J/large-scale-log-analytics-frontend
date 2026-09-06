@@ -1,15 +1,15 @@
-# EVOLVE — UI/UX Design Package
+# MorphGuard — UI/UX Design Package
 
-Companion to `evolve-prototype.html`. That file is the high-fidelity, interactive mockup;
-this document covers the parts a single screen can't: sitemap, flows, the design system as
-reusable rules, and the UX rationale behind them.
+Companion to the React app in `src/`. That code is the high-fidelity, interactive
+implementation; this document covers the parts a single screen can't: sitemap, flows, the
+design system as reusable rules, and the UX rationale behind them.
 
 ---
 
 ## 1. Application Sitemap
 
 ```
-EVOLVE
+MorphGuard
 │
 ├── Dashboard  (/)
 │   └── default landing after login
@@ -53,7 +53,7 @@ ingestion-status pill, notifications, account) on every authenticated route.
 
 ## 2. Primary User Flow
 
-The core loop EVOLVE is built around — a security analyst investigating a spike:
+The core loop MorphGuard is built around — a security analyst investigating a spike:
 
 ```
 Login
@@ -277,7 +277,7 @@ Kept deliberately restrained — this is enterprise software, not a marketing si
 
 ## 9. Mobile Responsiveness Strategy
 
-EVOLVE is a monitoring tool, not a mobile-first product — treat mobile as "check status and
+MorphGuard is a monitoring tool, not a mobile-first product — treat mobile as "check status and
 triage," not "do deep analysis on a phone."
 
 - **Sidebar** collapses to an off-canvas drawer (hamburger-triggered) below 720px instead
@@ -301,6 +301,7 @@ triage," not "do deep analysis on a phone."
 
 ## 10. File Reference
 
-- `evolve-prototype.html` — single-file interactive mockup, open directly in any browser.
-  All 5 core pages + Settings stub, live JS interactions (nav, upload simulation, table
-  search/filter, deploy modal + toast), Chart.js visualizations wired to mock data.
+- `src/MorphGuardApp.jsx` — the application shell and every page. All 5 core pages +
+  Settings stub, live interactions (nav, upload simulation, table search/filter, deploy
+  modal + toast), Recharts visualizations wired to mock data.
+- `src/LoginPage.jsx` — sign in / sign up, gating the dashboard.
