@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { apiGet, apiPost } from "./api.js";
+import { apiGet, apiPost, apiUpload } from "./api.js";
 import {
   LayoutDashboard, Database, ShieldAlert, BarChart3, GitBranch, Settings,
   Search, Bell, ChevronLeft, Plus, RefreshCw, UploadCloud, Download,
@@ -63,23 +63,10 @@ export function useSystemTheme() {
 
 const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning };
 
-const uploadsData = [
-  { name: "cluster-auth.log", src: "Manual Upload", size: "128 MB", rec: "412,004", time: "2026-07-27 09:14", status: "success" },
-  { name: "cloudwatch-export-0726.json", src: "AWS CloudWatch", size: "340 MB", rec: "1,204,552", time: "2026-07-26 22:03", status: "success" },
-  { name: "payment-gateway.log", src: "Manual Upload", size: "64 MB", rec: "198,441", time: "2026-07-26 14:51", status: "processing" },
-  { name: "network-flow-0725.csv", src: "Manual Upload", size: "22 MB", rec: "88,120", time: "2026-07-25 11:20", status: "success" },
-  { name: "legacy-app.log", src: "Manual Upload", size: "9 MB", rec: "14,032", time: "2026-07-24 08:02", status: "failed" },
-  { name: "cloudwatch-export-0723.json", src: "AWS CloudWatch", size: "288 MB", rec: "1,090,332", time: "2026-07-23 20:11", status: "success" },
-];
-
-const connectors = [
-  { name: "Manual File Upload", meta: "Active · 6 files this week", Icon: Database, enabled: true, accent: C.primary },
-  { name: "AWS CloudWatch", meta: "Streaming · connected", Icon: Cloud, enabled: true, accent: C.cyan },
-  { name: "Azure Monitor", meta: "Not connected", Icon: Server, enabled: false },
-  { name: "GCP Logging", meta: "Not connected", Icon: Waypoints, enabled: false },
-  { name: "Kafka Stream", meta: "Not connected", Icon: ListTree, enabled: false },
-  { name: "Syslog (RFC 5424)", meta: "Not connected", Icon: FileText, enabled: false },
-];
+// Maps the connector icon names the backend returns onto lucide components.
+const CONNECTOR_ICONS = {
+  Database, Cloud, Server, Waypoints, ListTree, FileText,
+};
 
 const SEVERITY_COLOR = { critical: C.danger, high: C.warning, medium: C.cyan };
 const SEVERITY_TONE = { critical: "danger", high: "warning", medium: "primary" };
@@ -667,25 +654,50 @@ function PageHeader({ title, sub, right }) {
   );
 }
 
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i += 1; }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[i]}`;
+}
+
 function SourcesPage() {
   const [dragOver, setDragOver] = useState(false);
   const [upload, setUpload] = useState(null);
   const fileRef = useRef(null);
   const [toast, setToast] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  function simulateUpload(name) {
-    name = name || "new-log-file.log";
-    setUpload({ name, pct: 0 });
-    let p = 0;
-    const iv = setInterval(() => {
-      p += Math.random() * 18;
-      if (p >= 100) {
-        p = 100; clearInterval(iv);
-        setToast({ title: "Upload complete", sub: `${name} is queued for analysis` });
-        setTimeout(() => setToast(null), 3200);
-      }
-      setUpload({ name, pct: Math.min(p, 100) });
-    }, 220);
+  const { data: history, loading, error } = useApiData(() => apiGet("/api/sources/uploads"), [refreshKey]);
+  const { data: connectorData } = useApiData(() => apiGet("/api/sources/connectors"), []);
+  const rows = history?.uploads || [];
+  const connectors = connectorData?.connectors || [];
+
+  // A just-uploaded file parses in the background, so poll while anything is
+  // still processing and stop once every row has settled.
+  const anyProcessing = rows.some((r) => r.status === "processing");
+  useEffect(() => {
+    if (!anyProcessing) return;
+    const iv = setInterval(() => setRefreshKey((k) => k + 1), 2500);
+    return () => clearInterval(iv);
+  }, [anyProcessing]);
+
+  async function handleFile(file) {
+    if (!file) return;
+    setUpload({ name: file.name, pct: 0 });
+    try {
+      await apiUpload("/api/sources/upload", file, (pct) => setUpload({ name: file.name, pct }));
+      setToast({ title: "Upload complete", sub: `${file.name} is queued for analysis` });
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setToast({ title: "Upload failed", sub: err.message });
+    } finally {
+      setUpload(null);
+      setTimeout(() => setToast(null), 3600);
+    }
   }
 
   return (
@@ -699,7 +711,7 @@ function SourcesPage() {
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); simulateUpload(e.dataTransfer.files[0]?.name); }}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
             onClick={() => fileRef.current.click()}
             style={{
               border: `1.5px dashed ${dragOver ? C.primary : C.border}`, borderRadius: 12, padding: "44px 20px",
@@ -712,7 +724,7 @@ function SourcesPage() {
             <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 4 }}>Drag &amp; drop log files</div>
             <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 14 }}>.log, .json, .csv, .txt — up to 500MB</div>
             <Button variant="primary" size="sm" onClick={(e) => { e.stopPropagation(); fileRef.current.click(); }}>Browse Files</Button>
-            <input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => simulateUpload(e.target.files[0]?.name)} />
+            <input ref={fileRef} type="file" accept=".log,.json,.csv,.txt" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
           </div>
           {upload && (
             <div style={{ marginTop: 14 }}>
@@ -728,42 +740,53 @@ function SourcesPage() {
         <Card>
           <CardHeader title="Supported Sources" meta="Future-ready connectors" />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-            {connectors.map((c) => (
-              <div key={c.name} style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", border: `1px solid ${C.border}`,
-                borderRadius: 8, background: C.bgRaised, opacity: c.enabled ? 1 : 0.45,
-              }}>
-                <div style={{ width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c.enabled ? C.primaryDim : C.bg, color: c.accent || C.textFaint }}>
-                  <c.Icon size={18} />
+            {connectors.map((c) => {
+              const Icon = CONNECTOR_ICONS[c.icon] || Database;
+              return (
+                <div key={c.name} style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", border: `1px solid ${C.border}`,
+                  borderRadius: 8, background: C.bgRaised, opacity: c.enabled ? 1 : 0.45,
+                }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c.enabled ? C.primaryDim : C.bg, color: c.enabled ? C.primary : C.textFaint }}>
+                    <Icon size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: c.enabled ? C.textHi : C.textMd }}>{c.name}</div>
+                    <div style={{ fontSize: 11.5, color: C.textFaint }}>{c.enabled ? "Active" : "Not connected"}</div>
+                  </div>
+                  {c.enabled
+                    ? <Badge tone="success" dot>Enabled</Badge>
+                    : <Button variant="ghost" size="sm" style={{ marginLeft: "auto" }}>Connect</Button>}
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: c.enabled ? C.textHi : C.textMd }}>{c.name}</div>
-                  <div style={{ fontSize: 11.5, color: C.textFaint }}>{c.meta}</div>
-                </div>
-                {c.enabled
-                  ? <Badge tone="success" dot>Enabled</Badge>
-                  : <Button variant="ghost" size="sm" style={{ marginLeft: "auto" }}>Connect</Button>}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </div>
 
       <Card padded={false}>
-        <div style={{ padding: "20px 22px 0" }}><CardHeader title="Upload History" meta="42 files total" /></div>
-        <Table head={["File Name", "Source", "Size", "Records", "Uploaded", "Status", ""]}>
-          {uploadsData.map((u) => (
-            <Row key={u.name}>
-              <Td title>{u.name}</Td>
-              <Td>{u.src}</Td>
-              <Td mono>{u.size}</Td>
-              <Td mono>{u.rec}</Td>
-              <Td mono>{u.time}</Td>
-              <Td>{u.status === "success" ? <Badge tone="success" dot>Processed</Badge> : u.status === "processing" ? <Badge tone="warning">Processing</Badge> : <Badge tone="danger">Failed</Badge>}</Td>
-              <Td><MoreVertical size={14} color={C.textFaint} style={{ cursor: "pointer" }} /></Td>
-            </Row>
-          ))}
-        </Table>
+        <div style={{ padding: "20px 22px 0" }}>
+          <CardHeader title="Upload History" meta={history ? `${history.total} file${history.total === 1 ? "" : "s"} total` : ""} />
+        </div>
+        {loading && !history ? <PageLoading /> : error ? <PageError message={error} /> : rows.length === 0 ? (
+          <div style={{ padding: "44px 20px", textAlign: "center", color: C.textFaint, fontSize: 13 }}>
+            No uploads yet — drop a log file above to get started.
+          </div>
+        ) : (
+          <Table head={["File Name", "Source", "Size", "Records", "Uploaded", "Status", ""]}>
+            {rows.map((u) => (
+              <Row key={u.id}>
+                <Td title>{u.name}</Td>
+                <Td>{u.source}</Td>
+                <Td mono>{formatBytes(u.size_bytes)}</Td>
+                <Td mono>{u.records != null ? u.records.toLocaleString() : "—"}</Td>
+                <Td mono>{formatTimestamp(u.uploaded_at)}</Td>
+                <Td>{u.status === "processed" ? <Badge tone="success" dot>Processed</Badge> : u.status === "processing" ? <Badge tone="warning">Processing</Badge> : <Badge tone="danger">Failed</Badge>}</Td>
+                <Td><MoreVertical size={14} color={C.textFaint} style={{ cursor: "pointer" }} /></Td>
+              </Row>
+            ))}
+          </Table>
+        )}
       </Card>
 
       {toast && <Toast title={toast.title} sub={toast.sub} />}
