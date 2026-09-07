@@ -776,10 +776,19 @@ function SourcesPage() {
           <Table head={["File Name", "Source", "Size", "Records", "Uploaded", "Status", ""]}>
             {rows.map((u) => (
               <Row key={u.id}>
-                <Td title>{u.name}</Td>
+                <Td title>
+                  {u.name}
+                  {u.status === "failed" && u.error && (
+                    <div style={{ fontSize: 11, fontWeight: 400, color: C.danger, marginTop: 3, whiteSpace: "normal", maxWidth: 340 }}>{u.error}</div>
+                  )}
+                </Td>
                 <Td>{u.source}</Td>
                 <Td mono>{formatBytes(u.size_bytes)}</Td>
-                <Td mono>{u.records != null ? u.records.toLocaleString() : "—"}</Td>
+                <Td mono>
+                  <span title={u.total_lines != null ? `${u.total_lines.toLocaleString()} lines in file` : undefined}>
+                    {u.records != null ? u.records.toLocaleString() : "—"}
+                  </span>
+                </Td>
                 <Td mono>{formatTimestamp(u.uploaded_at)}</Td>
                 <Td>{u.status === "processed" ? <Badge tone="success" dot>Processed</Badge> : u.status === "processing" ? <Badge tone="warning">Processing</Badge> : <Badge tone="danger">Failed</Badge>}</Td>
                 <Td><MoreVertical size={14} color={C.textFaint} style={{ cursor: "pointer" }} /></Td>
