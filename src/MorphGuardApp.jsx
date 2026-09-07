@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { apiGet, apiPost } from "./api.js";
 import {
   LayoutDashboard, Database, ShieldAlert, BarChart3, GitBranch, Settings,
   Search, Bell, ChevronLeft, Plus, RefreshCw, UploadCloud, Download,
@@ -60,14 +61,7 @@ export function useSystemTheme() {
   }, []);
 }
 
-const activity = [
-  { c: C.danger, text: "Critical anomaly detected in **auth-service** — score 0.94", t: "2 min ago" },
-  { c: C.primary, text: "Ingested 42,118 records from **cluster-auth.log**", t: "8 min ago" },
-  { c: C.warning, text: "Candidate model **V3** reached epoch 140/200", t: "23 min ago" },
-  { c: C.success, text: "Model **V2.3** passed health check — fitness 0.928", t: "1 hr ago" },
-  { c: C.primary, text: "New source connected: **AWS CloudWatch**", t: "2 hr ago" },
-  { c: C.danger, text: "Anomaly cluster flagged in **payment-gateway**", t: "3 hr ago" },
-];
+const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning };
 
 const uploadsData = [
   { name: "cluster-auth.log", src: "Manual Upload", size: "128 MB", rec: "412,004", time: "2026-07-27 09:14", status: "success" },
@@ -87,80 +81,9 @@ const connectors = [
   { name: "Syslog (RFC 5424)", meta: "Not connected", Icon: FileText, enabled: false },
 ];
 
-const detectionEvents = [
-  { t: "09:41:22", ev: "Unauthorized Access Attempt", comp: "auth-service", score: 0.94, sev: "critical", ip: "103.42.88.101" },
-  { t: "09:38:07", ev: "Anomalous API Latency Spike", comp: "payment-gateway", score: 0.88, sev: "high", ip: "10.0.4.22" },
-  { t: "09:22:51", ev: "Unusual Login Geography", comp: "auth-service", score: 0.81, sev: "high", ip: "198.51.100.7" },
-  { t: "08:57:14", ev: "Repeated Token Refresh Failures", comp: "api-gateway", score: 0.77, sev: "medium", ip: "172.16.5.44" },
-  { t: "08:40:03", ev: "Privilege Escalation Pattern", comp: "iam-controller", score: 0.91, sev: "critical", ip: "10.0.1.9" },
-  { t: "08:12:39", ev: "Config Drift Detected", comp: "k8s-scheduler", score: 0.72, sev: "medium", ip: "10.0.9.13" },
-  { t: "07:55:18", ev: "Data Exfiltration Signature", comp: "storage-service", score: 0.89, sev: "high", ip: "203.0.113.61" },
-  { t: "07:30:44", ev: "Brute Force Login Sequence", comp: "auth-service", score: 0.95, sev: "critical", ip: "45.33.12.201" },
-  { t: "07:02:09", ev: "Abnormal Outbound Traffic", comp: "network-proxy", score: 0.79, sev: "medium", ip: "10.0.2.61" },
-  { t: "06:44:57", ev: "Certificate Validation Failure", comp: "api-gateway", score: 0.75, sev: "medium", ip: "10.0.6.30" },
-];
-
-const deployHistory = [
-  { v: "V2.3", acc: "95.4%", fit: "0.928", date: "2026-07-21", status: "success" },
-  { v: "V2.2", acc: "94.1%", fit: "0.911", date: "2026-07-14", status: "success" },
-  { v: "V2.1", acc: "93.6%", fit: "0.902", date: "2026-07-07", status: "rollback" },
-  { v: "V2.0", acc: "92.8%", fit: "0.895", date: "2026-06-29", status: "success" },
-  { v: "V1", acc: "91.2%", fit: "0.870", date: "2026-06-15", status: "success" },
-];
-
-const modelTimeline = [
-  { c: C.warning, title: "V3 training started", meta: "2026-07-27 07:00", desc: "Retraining triggered by drift detection in auth-service traffic." },
-  { c: C.success, title: "V2.3 deployed to production", meta: "2026-07-21 16:20", desc: "Gradual rollout completed, fitness stable at 0.928." },
-  { c: C.success, title: "V2.2 promoted from candidate", meta: "2026-07-14 10:05", desc: "Accuracy improved 1.3pp on validation set." },
-  { c: C.danger, title: "V2.1 rolled back", meta: "2026-07-07 03:44", desc: "Fitness dropped below 0.90 threshold post-deploy; reverted to V2.0." },
-  { c: C.success, title: "V1 initial deployment", meta: "2026-06-15 09:00", desc: "Baseline isolation-forest model shipped." },
-];
-
-const volumeData = ["Jul 14","Jul 15","Jul 16","Jul 17","Jul 18","Jul 19","Jul 20","Jul 21","Jul 22","Jul 23","Jul 24","Jul 25","Jul 26","Jul 27"]
-  .map((d, i) => ({
-    day: d,
-    logs: [902,1001,963,1056,1144,1089,1232,1188,1265,1320,1298,1386,1441,1412][i],
-    anomalies: [62,58,71,65,80,74,88,95,90,102,98,110,118,128][i],
-  }));
-
-const severityMix = [
-  { name: "Critical", value: 18, color: C.danger },
-  { name: "High", value: 34, color: C.warning },
-  { name: "Medium", value: 48, color: C.cyan },
-];
-
-const anomalyTrendData = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d, i) => ({
-  day: d, anomalies: [142,168,155,190,210,175,128][i], threshold: 150,
-}));
-
-const logLevelData = [
-  { name: "INFO", value: 62, color: C.primary },
-  { name: "WARN", value: 21, color: C.warning },
-  { name: "ERROR", value: 12, color: C.danger },
-  { name: "DEBUG", value: 5, color: C.textFaint },
-];
-
-const eventDistData = [
-  { name: "Auth Fail", value: 38 }, { name: "API Latency", value: 27 },
-  { name: "Priv. Esc.", value: 19 }, { name: "Data Exfil", value: 12 }, { name: "Config Drift", value: 9 },
-];
-
-const componentDistData = [
-  { name: "auth-svc", value: 34 }, { name: "api-gw", value: 26 },
-  { name: "iam-ctrl", value: 18 }, { name: "k8s-sched", value: 14 }, { name: "storage", value: 8 },
-];
-
-const throughputData = ["00h","04h","08h","12h","16h","20h","24h"].map((t, i) => ({
-  t, rate: [812,760,940,1210,1180,1050,880][i],
-}));
-
-const detectionTrendData = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d, i) => ({
-  day: d,
-  "auth-service": [40,52,38,60,55,44,30][i],
-  "payment-gateway": [20,18,25,22,30,19,14][i],
-  "api-gateway": [15,20,17,24,19,16,12][i],
-  "iam-controller": [10,12,8,14,11,9,7][i],
-}));
+const SEVERITY_COLOR = { critical: C.danger, high: C.warning, medium: C.cyan };
+const SEVERITY_TONE = { critical: "danger", high: "warning", medium: "primary" };
+const CHART_PALETTE = [C.primary, C.cyan, C.success, C.warning, C.danger, C.textFaint];
 
 const navSections = [
   { label: "Monitor", items: [
@@ -207,6 +130,55 @@ function bold(text) {
   return parts.map((p, i) =>
     p.startsWith("**") ? <strong key={i} style={{ color: C.textHi }}>{p.slice(2, -2)}</strong> : p
   );
+}
+
+function useApiData(fetcher, deps) {
+  const [state, setState] = useState({ data: null, loading: true, error: null });
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
+
+  useEffect(() => {
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true, error: null }));
+    fetcherRef.current()
+      .then((data) => { if (!cancelled) setState({ data, loading: false, error: null }); })
+      .catch((err) => { if (!cancelled) setState({ data: null, loading: false, error: err.message || "Failed to load." }); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return state;
+}
+
+function PageLoading() {
+  return <div style={{ padding: "60px 0", textAlign: "center", color: C.textFaint, fontSize: 13 }}>Loading…</div>;
+}
+
+function PageError({ message }) {
+  return (
+    <Card style={{ textAlign: "center", padding: "32px 20px" }}>
+      <div style={{ color: C.danger, fontWeight: 600, marginBottom: 4 }}>Couldn't load this page</div>
+      <div style={{ color: C.textFaint, fontSize: 12.5 }}>{message}</div>
+    </Card>
+  );
+}
+
+function formatCompact(n) {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return String(n);
+}
+
+function formatTimestamp(iso) {
+  if (!iso) return "—";
+  return iso.replace("T", " ").slice(0, 19);
+}
+
+function formatDateRange(range) {
+  if (!range) return "";
+  const fmt = (iso) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${fmt(range.min)} – ${fmt(range.max)}`;
 }
 
 export function Logo({ size = 30, radius = 8 }) {
@@ -282,12 +254,12 @@ function CardHeader({ title, meta, right }) {
   );
 }
 
-function Button({ children, variant = "secondary", size = "md", onClick, style, icon: Icon }) {
+function Button({ children, variant = "secondary", size = "md", onClick, style, icon: Icon, disabled = false }) {
   const base = {
     display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, borderRadius: 8,
-    border: "1px solid transparent", cursor: "pointer", whiteSpace: "nowrap",
+    border: "1px solid transparent", cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap",
     fontSize: size === "sm" ? 12 : 13, padding: size === "sm" ? "6px 12px" : "9px 16px",
-    transition: "all .15s", fontFamily: C.sans,
+    transition: "all .15s", fontFamily: C.sans, opacity: disabled ? 0.6 : 1,
   };
   const variants = {
     primary: { background: C.primary, color: "#fff" },
@@ -295,7 +267,7 @@ function Button({ children, variant = "secondary", size = "md", onClick, style, 
     ghost: { background: "transparent", color: C.textMd },
   };
   return (
-    <button style={{ ...base, ...variants[variant], ...style }} onClick={onClick}>
+    <button disabled={disabled} style={{ ...base, ...variants[variant], ...style }} onClick={onClick}>
       {Icon && <Icon size={14} />}
       {children}
     </button>
@@ -539,26 +511,33 @@ function Topbar({ pageTitle }) {
 }
 
 function DashboardPage() {
+  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), []);
+
+  if (loading) return <PageLoading />;
+  if (error) return <PageError message={error} />;
+
+  const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range } = data;
+
   return (
     <div>
       <PageHeader
         title="Overview"
-        sub="Real-time system health across ingestion, detection, and model performance"
+        sub={`Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
         right={<>
           <Button size="sm" icon={Plus}>New Log Source</Button>
           <Button size="sm" variant="primary" icon={RefreshCw}>Run Detection Scan</Button>
         </>}
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
-        <KpiCard label="Total Logs Processed" value="18.42M" icon={FileText} iconBg={C.primaryDim} iconColor={C.primary} delta="12.4% vs last 24h" deltaUp />
-        <KpiCard label="Anomalies Detected" value="1,284" icon={AlertTriangle} iconBg={C.dangerDim} iconColor={C.danger} delta="3.1% vs last 24h" deltaUp={false} />
+      <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
+        <KpiCard label="Total Logs Processed" value={formatCompact(kpis.total_logs_processed)} icon={FileText} iconBg={C.primaryDim} iconColor={C.primary} />
+        <KpiCard label="Anomalies Detected" value={kpis.anomalies_detected.toLocaleString()} icon={AlertTriangle} iconBg={C.dangerDim} iconColor={C.danger} delta={`${kpis.anomaly_rate_pct.toFixed(2)}% of blocks`} deltaUp={false} />
         <Card hoverable>
           <div style={{ width: 36, height: 36, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, background: "rgba(34,211,238,0.12)", color: C.cyan }}>
             <GitBranch size={18} />
           </div>
           <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Current Model Version</div>
-          <div style={{ fontFamily: C.mono, fontSize: 28, fontWeight: 600, letterSpacing: "-.5px" }}>V2.3</div>
+          <div style={{ fontFamily: C.mono, fontSize: 28, fontWeight: 600, letterSpacing: "-.5px" }}>V{kpis.current_version}</div>
           <LineageMini />
         </Card>
         <Card hoverable>
@@ -567,34 +546,36 @@ function DashboardPage() {
           </div>
           <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Model Status</div>
           <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Active <Badge tone="success" dot>Healthy</Badge></div>
-          <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>Serving 100% of traffic</div>
+          <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>
+            {kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}% false positive rate` : "Serving all traffic"}
+          </div>
         </Card>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
-        <ChartCard title="Log Volume & Anomalies — Last 14 Days" right={<PillTabs options={[{value:"14d",label:"14D"},{value:"30d",label:"30D"},{value:"90d",label:"90D"}]} active="14d" onChange={()=>{}} />}>
+        <ChartCard title="Log Volume & Anomalies — by Day" meta={formatDateRange(date_range)}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={volumeData} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+            <ComposedChart data={volume_by_day} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={{ stroke: C.border }} tickLine={false} />
               <YAxis yAxisId="left" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="right" orientation="right" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <Tooltip {...tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 11, fontFamily: C.sans }} />
-              <Bar yAxisId="left" dataKey="logs" name="Logs (K)" fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
+              <Bar yAxisId="left" dataKey="logs" name="Log events" fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
               <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalies" stroke={C.danger} strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartCard>
 
         <Card>
-          <CardHeader title="Recent Activity" meta="Live feed" />
-          {activity.map((a, i) => (
-            <div key={i} style={{ display: "flex", gap: 12, padding: "12px 0", borderBottom: i < activity.length - 1 ? `1px solid ${C.borderSoft}` : "none", paddingTop: i === 0 ? 0 : 12 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 5, flexShrink: 0, background: a.c }} />
+          <CardHeader title="Recent Activity" meta="Detections + model events" />
+          {recent_activity.map((a, i) => (
+            <div key={i} style={{ display: "flex", gap: 12, padding: "12px 0", borderBottom: i < recent_activity.length - 1 ? `1px solid ${C.borderSoft}` : "none", paddingTop: i === 0 ? 0 : 12 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", marginTop: 5, flexShrink: 0, background: ACTIVITY_TONE[a.type] || C.primary }} />
               <div>
                 <div style={{ fontSize: 13, color: C.textHi, lineHeight: 1.4 }}>{bold(a.text)}</div>
-                <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 2, fontFamily: C.mono }}>{a.t}</div>
+                <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 2, fontFamily: C.mono }}>{formatTimestamp(a.timestamp)}</div>
               </div>
             </div>
           ))}
@@ -604,18 +585,16 @@ function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18 }}>
         <Card>
           <CardHeader title="Quick Statistics" />
-          <Stat label="Avg. detection latency" value="218ms" />
-          <Stat label="Active log sources" value="6 / 8" />
-          <Stat label="False positive rate" value="2.1%" color={C.success} />
-          <Stat label="Storage utilization" value="64%" />
-          <div style={{ marginTop: 6 }}><ProgressBar pct={64} /></div>
+          <Stat label="Blocks analyzed" value={kpis.total_blocks_analyzed.toLocaleString()} />
+          <Stat label="Anomaly rate" value={`${kpis.anomaly_rate_pct.toFixed(2)}%`} />
+          <Stat label="False positive rate" value={kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}%` : "—"} color={C.success} />
         </Card>
 
         <ChartCard title="Anomaly Severity Mix" height={200}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={severityMix} dataKey="value" nameKey="name" innerRadius={55} outerRadius={75} paddingAngle={2}>
-                {severityMix.map((s, i) => <Cell key={i} fill={s.color} stroke="none" />)}
+              <Pie data={severity_mix} dataKey="value" nameKey="name" innerRadius={55} outerRadius={75} paddingAngle={2}>
+                {severity_mix.map((s, i) => <Cell key={i} fill={SEVERITY_COLOR[s.name.toLowerCase()] || C.textFaint} stroke="none" />)}
               </Pie>
               <Legend verticalAlign="bottom" height={30} wrapperStyle={{ fontSize: 10.5, fontFamily: C.sans }} />
               <Tooltip {...tooltipStyle} />
@@ -624,24 +603,20 @@ function DashboardPage() {
         </ChartCard>
 
         <Card>
-          <CardHeader title="Model Evolution" right={<Badge tone="primary">Auto-optimizing</Badge>} />
+          <CardHeader title="Model Evolution" right={<Badge tone="primary">Deploy-if-better</Badge>} />
           <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>Current</div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-            <span style={{ fontFamily: C.mono, fontSize: 20, fontWeight: 700 }}>V2.3</span>
+            <span style={{ fontFamily: C.mono, fontSize: 20, fontWeight: 700 }}>V{kpis.current_version}</span>
             <Badge tone="success" dot>Active</Badge>
           </div>
-          {[
-            { v: "V1", pct: 91, color: C.textFaint, label: "91%" },
-            { v: "V2.3", pct: 95, color: C.cyan, label: "95%" },
-            { v: "V3", pct: 96, color: C.warning, label: "96%*" },
-          ].map((r) => (
-            <div key={r.v} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 8 }}>
-              <span style={{ width: 30, fontFamily: C.mono, color: r.color }}>{r.v}</span>
-              <div style={{ flex: 1 }}><ProgressBar pct={r.pct} color={r.color} height={8} /></div>
-              <span style={{ fontFamily: C.mono, color: C.textMd, width: 30 }}>{r.label}</span>
+          {model_evolution.map((r) => (
+            <div key={r.version} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 8 }}>
+              <span style={{ width: 30, fontFamily: C.mono, color: r.active ? C.cyan : C.textFaint }}>{r.version}</span>
+              <div style={{ flex: 1 }}><ProgressBar pct={r.accuracy_pct} color={r.active ? C.cyan : C.textFaint} height={8} /></div>
+              <span style={{ fontFamily: C.mono, color: C.textMd, width: 44 }}>{r.accuracy_pct.toFixed(1)}%</span>
             </div>
           ))}
-          <div style={{ marginTop: 10, fontSize: 11.5, color: C.textFaint }}>Last optimized <span style={{ fontFamily: C.mono }}>2h ago</span> · V3 training <span style={{ fontFamily: C.mono }}>73%</span></div>
+          <div style={{ marginTop: 10, fontSize: 11.5, color: C.textFaint }}>Promotes a retrained candidate only when it beats the currently deployed model's F1 score.</div>
         </Card>
       </div>
     </div>
@@ -798,90 +773,110 @@ function SourcesPage() {
 
 function DetectionPage() {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sev, setSev] = useState("all");
+  const [page, setPage] = useState(1);
+  const limit = 25;
 
-  const filtered = detectionEvents.filter((e) => {
-    const matchSev = sev === "all" || e.sev === sev;
-    const q = search.toLowerCase();
-    const matchSearch = !q || e.ev.toLowerCase().includes(q) || e.comp.toLowerCase().includes(q) || e.ip.includes(q);
-    return matchSev && matchSearch;
-  });
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const sevTone = { critical: "danger", high: "warning", medium: "primary" };
-  const sevColor = { critical: C.danger, high: C.warning, medium: C.cyan };
+  const { data: summary } = useApiData(() => apiGet("/api/detections/summary"), []);
+  const { data, loading, error } = useApiData(
+    () => apiGet("/api/detections", { search: debouncedSearch, severity: sev, page, limit }),
+    [debouncedSearch, sev, page]
+  );
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1;
 
   return (
     <div>
-      <PageHeader title="Detection Results" sub="Anomaly classification output from model V2.3 across all ingested sources"
+      <PageHeader title="Detection Results" sub="Block-level anomaly classification from the currently deployed Isolation Forest model"
         right={<Button size="sm" icon={Download}>Export CSV</Button>} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
-        <KpiCard label="Total Logs Analyzed" value="842,910" />
-        <KpiCard label="Normal Logs" value="841,626" valueColor={C.success} footer={<div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>99.85% of total</div>} />
-        <KpiCard label="Anomalous Logs" value="1,284" valueColor={C.danger} footer={<div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>0.15% of total</div>} />
-        <KpiCard label="Avg. Anomaly Score" value="0.847" valueColor={C.warning} footer={<div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>Threshold: 0.75</div>} />
+      <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
+        <KpiCard label="Total Blocks Analyzed" value={summary ? summary.total_analyzed.toLocaleString() : "—"} />
+        <KpiCard label="Normal Blocks" value={summary ? summary.normal_count.toLocaleString() : "—"} valueColor={C.success}
+          footer={summary && <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>{(summary.normal_count / summary.total_analyzed * 100).toFixed(2)}% of total</div>} />
+        <KpiCard label="Anomalous Blocks" value={summary ? summary.anomalous_count.toLocaleString() : "—"} valueColor={C.danger}
+          footer={summary && <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>{(summary.anomalous_count / summary.total_analyzed * 100).toFixed(2)}% of total</div>} />
+        <KpiCard label="Avg. Anomaly Score" value={summary ? summary.avg_anomaly_score.toFixed(3) : "—"} valueColor={C.warning}
+          footer={summary && <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>Contamination: {summary.contamination_threshold.toFixed(3)}</div>} />
       </div>
 
       <Card padded={false} style={{ marginBottom: 18 }}>
         <div style={{ padding: "20px 22px 16px" }}>
           <CardHeader title="Detection Summary" />
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-            <SearchBox value={search} onChange={setSearch} placeholder="Search event, component, IP..." width={260} />
+            <SearchBox value={search} onChange={setSearch} placeholder="Search block ID, component, event type, source IP..." width={300} />
             <PillTabs
-              active={sev} onChange={setSev}
+              active={sev} onChange={(v) => { setSev(v); setPage(1); }}
               options={[{ value: "all", label: "All" }, { value: "critical", label: "Critical" }, { value: "high", label: "High" }, { value: "medium", label: "Medium" }]}
             />
-            <select style={{ marginLeft: "auto", background: C.bgRaised, border: `1px solid ${C.border}`, color: C.textMd, borderRadius: 8, padding: "8px 12px", fontSize: 12.5 }}>
-              <option>Last 24 hours</option><option>Last 7 days</option><option>Last 30 days</option>
-            </select>
           </div>
         </div>
-        <Table head={["Timestamp", "Event Type", "Component", "Anomaly Score", "Severity", "Source IP", ""]}>
-          {filtered.map((e, i) => (
-            <Row key={i}>
-              <Td mono>2026-07-27 {e.t}</Td>
-              <Td title>{e.ev}</Td>
-              <Td mono>{e.comp}</Td>
-              <Td>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, width: 120 }}>
-                  <div style={{ flex: 1, height: 6, borderRadius: 4, background: C.bgRaised, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${e.score * 100}%`, background: sevColor[e.sev], borderRadius: 4 }} />
-                  </div>
-                  <span style={{ fontFamily: C.mono, fontSize: 12 }}>{e.score.toFixed(2)}</span>
-                </div>
-              </Td>
-              <Td><Badge tone={sevTone[e.sev]} dot>{e.sev}</Badge></Td>
-              <Td mono>{e.ip}</Td>
-              <Td><Button variant="ghost" size="sm">Investigate</Button></Td>
+        {error && <div style={{ padding: "0 22px 16px", color: C.danger, fontSize: 13 }}>{error}</div>}
+        <Table head={["Timestamp", "Block ID", "Component", "Event Type", "Anomaly Score", "Severity", "Source IP"]}>
+          {(data?.items || []).map((e) => (
+            <Row key={e.block_id}>
+              <Td mono>{formatTimestamp(e.timestamp)}</Td>
+              <Td title mono>{e.block_id}</Td>
+              <Td mono>{e.component}</Td>
+              <Td mono>{e.event_type}</Td>
+              <Td mono>{e.anomaly_score.toFixed(4)}</Td>
+              <Td>{e.severity === "normal" ? <Badge tone="neutral">normal</Badge> : <Badge tone={SEVERITY_TONE[e.severity]} dot>{e.severity}</Badge>}</Td>
+              <Td mono>{e.source_ip}</Td>
             </Row>
           ))}
-          {filtered.length === 0 && (
-            <tr><td colSpan={7} style={{ padding: "32px 14px", textAlign: "center", color: C.textFaint, fontSize: 13 }}>No events match this filter — try a different search or severity.</td></tr>
+          {!loading && data && data.items.length === 0 && (
+            <tr><td colSpan={7} style={{ padding: "32px 14px", textAlign: "center", color: C.textFaint, fontSize: 13 }}>No blocks match this filter — try a different search or severity.</td></tr>
           )}
         </Table>
+        {loading && <div style={{ padding: "24px 0" }}><PageLoading /></div>}
+        {data && data.total > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderTop: `1px solid ${C.borderSoft}` }}>
+            <span style={{ fontSize: 12, color: C.textFaint }}>
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, data.total)} of {data.total.toLocaleString()}
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ opacity: page <= 1 ? 0.4 : 1 }}>Prev</Button>
+              <span style={{ fontSize: 12, color: C.textMd, fontFamily: C.mono, padding: "6px 4px" }}>Page {page} / {totalPages}</span>
+              <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} style={{ opacity: page >= totalPages ? 0.4 : 1 }}>Next</Button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );
 }
 
 function AnalyticsPage() {
-  const [range, setRange] = useState("7d");
+  const { data, loading, error } = useApiData(() => apiGet("/api/analytics"), []);
+
+  if (loading) return <PageLoading />;
+  if (error) return <PageError message={error} />;
+
+  const {
+    component_distribution, event_type_distribution, log_level_distribution,
+    hour_of_day_distribution, anomalies_by_day, anomalies_by_component_by_day,
+    top_components, date_range,
+  } = data;
+
   return (
     <div>
-      <PageHeader title="Analytics" sub="Interactive visualizations for trend analysis and system-wide insight"
-        right={<PillTabs active={range} onChange={setRange} options={[{value:"7d",label:"7D"},{value:"30d",label:"30D"},{value:"90d",label:"90D"}]} />} />
+      <PageHeader title="Analytics" sub={`Real distributions from the HDFS log trace (${formatDateRange(date_range)})`} />
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
-        <ChartCard title="Anomalies Over Time" meta="Detected vs. Threshold">
+        <ChartCard title="Anomalies Detected — by Day" meta={formatDateRange(date_range)}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={anomalyTrendData} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+            <LineChart data={anomalies_by_day} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={{ stroke: C.border }} tickLine={false} />
               <YAxis tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <Tooltip {...tooltipStyle} />
-              <Legend wrapperStyle={{ fontSize: 11, fontFamily: C.sans }} />
-              <Line type="monotone" dataKey="anomalies" name="Anomalies Detected" stroke={C.danger} strokeWidth={2} dot={{ r: 3, fill: C.danger }} />
-              <Line type="monotone" dataKey="threshold" name="Alert Threshold" stroke={C.textFaint} strokeDasharray="6 4" strokeWidth={1.5} dot={false} />
+              <Line type="monotone" dataKey="anomalies" name="Anomalies Detected" stroke={C.danger} strokeWidth={2} dot={{ r: 4, fill: C.danger }} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -889,8 +884,8 @@ function AnalyticsPage() {
         <ChartCard title="Log Level Distribution">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={logLevelData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={85} paddingAngle={2}>
-                {logLevelData.map((s, i) => <Cell key={i} fill={s.color} stroke="none" />)}
+              <Pie data={log_level_distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={85} paddingAngle={2}>
+                {log_level_distribution.map((s, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} stroke="none" />)}
               </Pie>
               <Legend verticalAlign="bottom" wrapperStyle={{ fontSize: 10.5, fontFamily: C.sans }} />
               <Tooltip {...tooltipStyle} />
@@ -899,56 +894,58 @@ function AnalyticsPage() {
         </ChartCard>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginBottom: 18 }}>
-        <ChartCard title="Event Type Distribution" height={200}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
+        <ChartCard title="Event Type Distribution" height={260}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={eventDistData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+            <BarChart data={event_type_distribution} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} horizontal={false} />
               <XAxis type="number" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fill: C.textMd, fontSize: 10.5 }} axisLine={false} tickLine={false} width={80} />
+              <YAxis type="category" dataKey="name" tick={{ fill: C.textMd, fontSize: 10 }} axisLine={false} tickLine={false} width={120} />
               <Tooltip {...tooltipStyle} />
-              <Bar dataKey="value" fill={C.primary} radius={[0,4,4,0]} barSize={14} />
+              <Bar dataKey="value" fill={C.primary} radius={[0,4,4,0]} barSize={12} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Component Distribution" height={200}>
+        <ChartCard title="Component Distribution" height={260}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={componentDistData} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+            <BarChart data={component_distribution} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} horizontal={false} />
               <XAxis type="number" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fill: C.textMd, fontSize: 10.5 }} axisLine={false} tickLine={false} width={80} />
+              <YAxis type="category" dataKey="name" tick={{ fill: C.textMd, fontSize: 10 }} axisLine={false} tickLine={false} width={150} />
               <Tooltip {...tooltipStyle} />
-              <Bar dataKey="value" fill={C.cyan} radius={[0,4,4,0]} barSize={14} />
+              <Bar dataKey="value" fill={C.cyan} radius={[0,4,4,0]} barSize={12} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
+      </div>
 
-        <ChartCard title="Processing Throughput" meta="logs / sec" height={200}>
+      <div style={{ marginBottom: 18 }}>
+        <ChartCard title="Events by Hour of Day" meta="Aggregated across the full trace" height={220}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={throughputData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+            <AreaChart data={hour_of_day_distribution} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
-              <XAxis dataKey="t" tick={{ fill: C.textFaint, fontSize: 9.5, fontFamily: C.mono }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="hour" tick={{ fill: C.textFaint, fontSize: 9.5, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <Tooltip {...tooltipStyle} />
-              <Area type="monotone" dataKey="rate" stroke={C.success} fill="rgba(16,185,129,0.12)" strokeWidth={2} />
+              <Area type="monotone" dataKey="count" name="Blocks" stroke={C.success} fill="rgba(16,185,129,0.12)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
 
-      <ChartCard title="Detection Trends by Component" meta="Stacked, last 7 days">
+      <ChartCard title="Anomalies by Component" meta={`Stacked, ${formatDateRange(date_range)}`}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={detectionTrendData} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+          <BarChart data={anomalies_by_component_by_day} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
             <CartesianGrid stroke={C.borderSoft} vertical={false} />
             <XAxis dataKey="day" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={{ stroke: C.border }} tickLine={false} />
             <YAxis tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
             <Tooltip {...tooltipStyle} />
             <Legend wrapperStyle={{ fontSize: 11, fontFamily: C.sans }} />
-            <Bar dataKey="auth-service" stackId="s" fill={C.danger} radius={[0,0,0,0]} />
-            <Bar dataKey="payment-gateway" stackId="s" fill={C.warning} />
-            <Bar dataKey="api-gateway" stackId="s" fill={C.cyan} />
-            <Bar dataKey="iam-controller" stackId="s" fill={C.primary} radius={[4,4,0,0]} />
+            {top_components.map((component, i) => (
+              <Bar key={component} dataKey={component} stackId="s" fill={CHART_PALETTE[i % CHART_PALETTE.length]}
+                radius={i === top_components.length - 1 ? [4,4,0,0] : [0,0,0,0]} />
+            ))}
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
@@ -956,71 +953,140 @@ function AnalyticsPage() {
   );
 }
 
+const TIMELINE_COLOR = { success: C.success, danger: C.danger, warning: C.warning };
+
+function useElapsedSeconds(startedAt, running) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [running]);
+  if (!startedAt) return 0;
+  return Math.max(0, Math.round((now - new Date(startedAt).getTime()) / 1000));
+}
+
 function ModelsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [job, setJob] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  function confirmDeploy() {
+  const { data, loading, error } = useApiData(() => apiGet("/api/models"), [refreshKey]);
+
+  useEffect(() => {
+    if (data?.job && !job) setJob(data.job);
+  }, [data, job]);
+
+  useEffect(() => {
+    if (!job || job.state !== "running") return;
+    const iv = setInterval(async () => {
+      try {
+        const updated = await apiGet(`/api/models/retrain/${job.job_id}`);
+        setJob(updated);
+        if (updated.state !== "running") {
+          setToast({
+            title: updated.state === "error" ? "Retrain failed" : updated.result.promoted ? "Candidate promoted" : "Candidate not promoted",
+            sub: updated.state === "error" ? updated.error : updated.result.promoted
+              ? `Promoted to V${updated.result.new_version} (${updated.result.metric}: ${updated.result.candidate_metric_value.toFixed(4)})`
+              : `${updated.result.metric} ${updated.result.candidate_metric_value.toFixed(4)} did not beat current ${updated.result.current_metric_value.toFixed(4)}`,
+          });
+          setTimeout(() => setToast(null), 5000);
+          setRefreshKey((k) => k + 1);
+        }
+      } catch {
+        // transient poll failure — try again on the next tick
+      }
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [job]);
+
+  const elapsed = useElapsedSeconds(job?.started_at, job?.state === "running");
+
+  async function startRetrain() {
     setModalOpen(false);
-    setToast({ title: "Deployment started", sub: "V3 is rolling out gradually over 30 minutes" });
-    setTimeout(() => setToast(null), 3200);
+    try {
+      const { job_id } = await apiPost("/api/models/retrain");
+      setJob({ state: "running", started_at: new Date().toISOString(), job_id, result: null, error: null });
+    } catch (err) {
+      setToast({ title: "Couldn't start retrain", sub: err.message });
+      setTimeout(() => setToast(null), 4000);
+    }
   }
+
+  if (loading) return <PageLoading />;
+  if (error) return <PageError message={error} />;
+
+  const { current, history_table, timeline } = data;
+  const isRunning = job?.state === "running";
+  const previous = history_table.length > 1 ? history_table[history_table.length - 2] : null;
+  const lastOutcome = timeline[0];
 
   return (
     <div>
-      <PageHeader title="Model Management" sub="MorphGuard continuously trains, evaluates, and promotes candidate models"
-        right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)}>Deploy New Model</Button>} />
+      <PageHeader title="Model Management" sub="Retrains via genetic-algorithm optimization and promotes a candidate only if it beats the currently deployed model"
+        right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)} disabled={isRunning}>{isRunning ? "Retrain running…" : "Run Retrain Cycle"}</Button>} />
 
       <Card style={{ padding: "28px 26px 20px", marginBottom: 18 }}>
-        <CardHeader title="Model Evolution Lineage" right={<Badge tone="primary">3 generations</Badge>} />
+        <CardHeader title="Model Evolution Lineage" right={<Badge tone="primary">{history_table.length} version{history_table.length === 1 ? "" : "s"}</Badge>} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "40px 10px 10px" }}>
           <div style={{ position: "absolute", left: "5%", right: "5%", top: 60, height: 2, background: C.border, zIndex: 0 }} />
           <div style={{ position: "absolute", left: "5%", top: 60, height: 2, width: "62%", background: `linear-gradient(90deg, ${C.textFaint}, ${C.primary}, ${C.cyan})`, zIndex: 1 }} />
 
-          <GenNode tone="retired" label="Retired" version="V1" acc="91.2% acc" status={<Badge tone="neutral">Archived</Badge>} />
-          <GenNode tone="deployed" label="Deployed" version="V2.3" acc="95.4% acc" status={<Badge tone="success" dot>Active</Badge>} />
-          <GenNode tone="candidate" label="Candidate" version="V3" acc="96.1% acc*" status={<Badge tone="warning">Training · 73%</Badge>} />
-        </div>
-        <div style={{ textAlign: "center", fontSize: 11.5, color: C.textFaint, marginTop: 6 }}>
-          *Provisional score on held-out validation set · Last optimized <span style={{ fontFamily: C.mono, color: C.textMd }}>2 hours ago</span>
+          {previous
+            ? <GenNode tone="retired" label="Retired" version={previous.version} acc={`${previous.accuracy_pct.toFixed(1)}% acc`} status={<Badge tone="neutral">Retired</Badge>} />
+            : <GenNode tone="retired" label="Baseline" version={current.version === 1 ? `V${current.version}` : "—"} acc="" status={<Badge tone="neutral">—</Badge>} />}
+          <GenNode tone="deployed" label="Deployed" version={`V${current.version}`} acc={`${(current.metrics?.accuracy * 100 || 0).toFixed(1)}% acc`} status={<Badge tone="success" dot>Active</Badge>} />
+          {isRunning
+            ? <GenNode tone="candidate" label="Candidate" version={`${elapsed}s`} acc="running" status={<Badge tone="warning">Training…</Badge>} />
+            : lastOutcome
+              ? <GenNode tone="candidate" label="Last Attempt" version={lastOutcome.title.startsWith("V") ? lastOutcome.title.split(" ")[0] : "Rejected"}
+                  acc={lastOutcome.desc} status={<Badge tone={lastOutcome.tone === "success" ? "success" : "danger"} dot={lastOutcome.tone === "success"}>{lastOutcome.tone === "success" ? "Promoted" : "Rejected"}</Badge>} />
+              : <GenNode tone="candidate" label="Candidate" version="—" acc="No runs yet" status={<Badge tone="neutral">Idle</Badge>} />}
         </div>
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
         <Card>
-          <CardHeader title="Deployed Model — V2.3" right={<Badge tone="success" dot>Live</Badge>} />
+          <CardHeader title={`Deployed Model — V${current.version}`} right={<Badge tone="success" dot>Live</Badge>} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <MetricBlock label="Accuracy" value="95.4%" />
-            <MetricBlock label="Fitness Score" value="0.928" />
-            <MetricBlock label="Detection Threshold" value="0.750" />
-            <MetricBlock label="Deployed Since" value="Jul 21, 2026" small />
+            <MetricBlock label="Accuracy" value={`${((current.metrics?.accuracy || 0) * 100).toFixed(1)}%`} />
+            <MetricBlock label="F1 Score" value={(current.metrics?.f1 || 0).toFixed(4)} />
+            <MetricBlock label="Precision" value={(current.metrics?.precision || 0).toFixed(4)} />
+            <MetricBlock label="Recall" value={(current.metrics?.recall || 0).toFixed(4)} />
           </div>
         </Card>
         <Card>
-          <CardHeader title="Candidate Model — V3" right={<Badge tone="warning">Training</Badge>} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <MetricBlock label="Accuracy (val)" value="96.1%" color={C.warning} />
-            <MetricBlock label="Fitness Score" value="0.941" color={C.warning} />
-            <div style={{ gridColumn: "span 2" }}>
-              <div style={{ fontSize: 12, color: C.textLo, marginBottom: 8 }}>Training Progress</div>
-              <ProgressBar pct={73} color={C.warning} />
-              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 6 }}>Epoch 146 / 200 · ETA 40 min</div>
+          <CardHeader title="Candidate / Last Retrain" right={isRunning ? <Badge tone="warning">Running</Badge> : <Badge tone="neutral">Idle</Badge>} />
+          {isRunning ? (
+            <div>
+              <div style={{ fontSize: 12, color: C.textLo, marginBottom: 8 }}>GA optimization in progress</div>
+              <ProgressBar pct={Math.min(95, elapsed / 180 * 100)} color={C.warning} />
+              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 6 }}>Elapsed {elapsed}s · typically ~3 minutes</div>
             </div>
-          </div>
+          ) : lastOutcome ? (
+            <div>
+              <div style={{ fontSize: 13, color: C.textHi, marginBottom: 6 }}>{lastOutcome.title}</div>
+              <div style={{ fontSize: 12.5, color: C.textMd, marginBottom: 6 }}>{lastOutcome.desc}</div>
+              <div style={{ fontSize: 11.5, color: C.textFaint, fontFamily: C.mono }}>{formatTimestamp(lastOutcome.meta)}</div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: C.textFaint }}>No retrain cycle has run yet.</div>
+          )}
         </Card>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "7fr 5fr", gap: 18 }}>
         <Card>
           <CardHeader title="Deployment History" />
-          <Table head={["Version", "Accuracy", "Fitness", "Deployed", "Status"]}>
-            {deployHistory.map((d) => (
-              <Row key={d.v}>
-                <Td title mono>{d.v}</Td>
-                <Td mono>{d.acc}</Td>
-                <Td mono>{d.fit}</Td>
-                <Td mono>{d.date}</Td>
-                <Td>{d.status === "success" ? <Badge tone="success" dot>Stable</Badge> : <Badge tone="danger">Rolled Back</Badge>}</Td>
+          <Table head={["Version", "Accuracy", "F1", "Promoted", "Status"]}>
+            {history_table.map((d) => (
+              <Row key={d.version}>
+                <Td title mono>{d.version}</Td>
+                <Td mono>{d.accuracy_pct.toFixed(1)}%</Td>
+                <Td mono>{d.f1?.toFixed(4) ?? "—"}</Td>
+                <Td mono>{formatTimestamp(d.promoted_at)}</Td>
+                <Td>{d.status === "active" ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral">Retired</Badge>}</Td>
               </Row>
             ))}
           </Table>
@@ -1030,11 +1096,12 @@ function ModelsPage() {
           <CardHeader title="Model Evolution Timeline" />
           <div style={{ position: "relative", paddingLeft: 28 }}>
             <div style={{ position: "absolute", left: 6, top: 4, bottom: 4, width: 2, background: C.border }} />
-            {modelTimeline.map((t, i) => (
-              <div key={i} style={{ position: "relative", paddingBottom: i < modelTimeline.length - 1 ? 22 : 0 }}>
-                <div style={{ position: "absolute", left: -28, top: 2, width: 14, height: 14, borderRadius: "50%", background: `${t.c}22`, border: `2px solid ${t.c}`, zIndex: 1 }} />
+            {timeline.length === 0 && <div style={{ fontSize: 12.5, color: C.textFaint }}>No retrain cycles recorded yet.</div>}
+            {timeline.map((t, i) => (
+              <div key={i} style={{ position: "relative", paddingBottom: i < timeline.length - 1 ? 22 : 0 }}>
+                <div style={{ position: "absolute", left: -28, top: 2, width: 14, height: 14, borderRadius: "50%", background: `${TIMELINE_COLOR[t.tone]}22`, border: `2px solid ${TIMELINE_COLOR[t.tone]}`, zIndex: 1 }} />
                 <div style={{ fontSize: 13, fontWeight: 600, color: C.textHi }}>{t.title}</div>
-                <div style={{ fontSize: 12, color: C.textFaint, marginTop: 3, fontFamily: C.mono }}>{t.meta}</div>
+                <div style={{ fontSize: 12, color: C.textFaint, marginTop: 3, fontFamily: C.mono }}>{formatTimestamp(t.meta)}</div>
                 <div style={{ fontSize: 12.5, color: C.textMd, marginTop: 4 }}>{t.desc}</div>
               </div>
             ))}
@@ -1048,18 +1115,16 @@ function ModelsPage() {
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: "90vw", background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,.45)", padding: 26 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Deploy candidate model?</h3>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Start a new retrain cycle?</h3>
             <p style={{ fontSize: 13, color: C.textMd, marginBottom: 18, lineHeight: 1.5 }}>
-              Version <strong style={{ fontFamily: C.mono, color: C.textHi }}>V3</strong> will replace <strong style={{ fontFamily: C.mono, color: C.textHi }}>V2.3</strong> as the active detection model.
-              Traffic shifts gradually over 30 minutes with automatic rollback if fitness drops below <strong style={{ fontFamily: C.mono }}>0.90</strong>.
+              Runs a fresh GA optimization pass over the full labeled dataset (~3 minutes) to produce a candidate model,
+              then automatically promotes it to <strong style={{ fontFamily: C.mono, color: C.textHi }}>V{current.version + 1}</strong> only
+              if its F1 score beats the currently deployed <strong style={{ fontFamily: C.mono, color: C.textHi }}>V{current.version}</strong> (F1: {(current.metrics?.f1 || 0).toFixed(4)}).
+              Otherwise the candidate is archived and nothing changes.
             </p>
-            <div style={{ background: C.bgRaised, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", fontSize: 12.5, color: C.textMd, marginBottom: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span>Validation accuracy</span><span style={{ fontFamily: C.mono, color: C.warning }}>96.1%</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span>Training completion</span><span style={{ fontFamily: C.mono, color: C.warning }}>73%</span></div>
-            </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
               <Button variant="ghost" size="sm" onClick={() => setModalOpen(false)}>Cancel</Button>
-              <Button variant="primary" size="sm" onClick={confirmDeploy}>Confirm Deployment</Button>
+              <Button variant="primary" size="sm" onClick={startRetrain}>Start Retrain</Button>
             </div>
           </div>
         </div>

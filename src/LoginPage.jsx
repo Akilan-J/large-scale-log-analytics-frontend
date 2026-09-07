@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Logo } from "./MorphGuardApp.jsx";
-
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+import { API_BASE } from "./api.js";
 
 export default function LoginPage({ colors: C, onAuthenticated }) {
   const [mode, setMode] = useState("login");
