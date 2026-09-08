@@ -241,7 +241,7 @@ function CardHeader({ title, meta, right }) {
   );
 }
 
-function Button({ children, variant = "secondary", size = "md", onClick, style, icon: Icon, disabled = false }) {
+function Button({ children, variant = "secondary", size = "md", onClick, style, icon: Icon, disabled = false, title }) {
   const base = {
     display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600, borderRadius: 8,
     border: "1px solid transparent", cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap",
@@ -254,7 +254,7 @@ function Button({ children, variant = "secondary", size = "md", onClick, style, 
     ghost: { background: "transparent", color: C.textMd },
   };
   return (
-    <button disabled={disabled} style={{ ...base, ...variants[variant], ...style }} onClick={onClick}>
+    <button disabled={disabled} title={title} style={{ ...base, ...variants[variant], ...style }} onClick={onClick}>
       {Icon && <Icon size={14} />}
       {children}
     </button>
@@ -322,9 +322,13 @@ function KpiCard({ label, value, valueColor, icon: Icon, iconBg, iconColor, delt
 
 function ChartCard({ title, meta, right, height = 260, children }) {
   return (
-    <Card>
+    <Card style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <CardHeader title={title} meta={meta} right={right} />
-      <div style={{ height }}>{children}</div>
+      {/* flex: 1 lets the chart fill whatever height the grid row actually
+          stretched this card to (e.g. to match a taller sibling), instead of
+          leaving dead space below a fixed-height plot; minHeight keeps it
+          from collapsing in a short row. */}
+      <div style={{ flex: 1, minHeight: height }}>{children}</div>
     </Card>
   );
 }
@@ -497,8 +501,55 @@ function Topbar({ pageTitle }) {
   );
 }
 
-function DashboardPage() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), []);
+function DashboardPage({ onNavigate }) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [job, setJob] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), [refreshKey]);
+
+  // Same global retrain job Model Management drives — the backend only ever
+  // runs one at a time, so this is a second entry point onto that one job,
+  // not an independent scan.
+  useEffect(() => {
+    if (!job || job.state !== "running") return;
+    const iv = setInterval(async () => {
+      try {
+        const updated = await apiGet(`/api/models/retrain/${job.job_id}`);
+        setJob(updated);
+        if (updated.state !== "running") {
+          setToast({
+            title: updated.state === "error" ? "Detection scan failed" : updated.result.promoted ? "New model promoted" : "Candidate not promoted",
+            sub: updated.state === "error"
+              ? updated.error
+              : updated.result.promoted
+                ? `New model instance V${updated.result.new_version} beat the deployed one (${updated.result.metric}: ${updated.result.candidate_metric_value.toFixed(4)}) and is now live.`
+                : `New candidate scored ${updated.result.metric} ${updated.result.candidate_metric_value.toFixed(4)}, which didn't beat the current ${updated.result.current_metric_value.toFixed(4)} — nothing changed.`,
+          });
+          setTimeout(() => setToast(null), 6000);
+          setRefreshKey((k) => k + 1);
+        }
+      } catch {
+        // transient poll failure — try again on the next tick
+      }
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [job]);
+
+  const isRunning = job?.state === "running";
+  const elapsed = useElapsedSeconds(job?.started_at, isRunning);
+
+  async function startScan() {
+    setConfirmOpen(false);
+    try {
+      const { job_id } = await apiPost("/api/models/retrain");
+      setJob({ state: "running", started_at: new Date().toISOString(), job_id, result: null, error: null });
+    } catch (err) {
+      setToast({ title: "Couldn't start detection scan", sub: err.message });
+      setTimeout(() => setToast(null), 4000);
+    }
+  }
 
   if (loading) return <PageLoading />;
   if (error) return <PageError message={error} />;
@@ -511,14 +562,16 @@ function DashboardPage() {
         title="Overview"
         sub={`Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
         right={<>
-          <Button size="sm" icon={Plus}>New Log Source</Button>
-          <Button size="sm" variant="primary" icon={RefreshCw}>Run Detection Scan</Button>
+          <Button size="sm" icon={Plus} onClick={() => onNavigate("sources")}>New Log Source</Button>
+          <Button size="sm" variant="primary" icon={RefreshCw} onClick={() => setConfirmOpen(true)} disabled={isRunning}>
+            {isRunning ? `Training… ${elapsed}s` : "Run Detection Scan"}
+          </Button>
         </>}
       />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
         <KpiCard label="Total Logs Processed" value={formatCompact(kpis.total_logs_processed)} icon={FileText} iconBg={C.primaryDim} iconColor={C.primary} />
-        <KpiCard label="Anomalies Detected" value={kpis.anomalies_detected.toLocaleString()} icon={AlertTriangle} iconBg={C.dangerDim} iconColor={C.danger} delta={`${kpis.anomaly_rate_pct.toFixed(2)}% of blocks`} deltaUp={false} />
+        <KpiCard label="Anomalies Detected" value={kpis.anomalies_detected.toLocaleString("en-US")} icon={AlertTriangle} iconBg={C.dangerDim} iconColor={C.danger} delta={`${kpis.anomaly_rate_pct.toFixed(2)}% of blocks`} deltaUp={false} />
         <Card hoverable>
           <div style={{ width: 36, height: 36, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, background: "rgba(34,211,238,0.12)", color: C.cyan }}>
             <GitBranch size={18} />
@@ -550,7 +603,7 @@ function DashboardPage() {
               <Tooltip {...tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 11, fontFamily: C.sans }} />
               <Bar yAxisId="left" dataKey="logs" name="Log events" fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
-              <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalies" stroke={C.danger} strokeWidth={2} dot={false} />
+              <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalies" stroke={C.danger} strokeWidth={2} dot={{ r: 4, fill: C.danger }} activeDot={{ r: 6 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -572,7 +625,7 @@ function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18 }}>
         <Card>
           <CardHeader title="Quick Statistics" />
-          <Stat label="Blocks analyzed" value={kpis.total_blocks_analyzed.toLocaleString()} />
+          <Stat label="Blocks analyzed" value={kpis.total_blocks_analyzed.toLocaleString("en-US")} />
           <Stat label="Anomaly rate" value={`${kpis.anomaly_rate_pct.toFixed(2)}%`} />
           <Stat label="False positive rate" value={kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}%` : "—"} color={C.success} />
         </Card>
@@ -606,6 +659,29 @@ function DashboardPage() {
           <div style={{ marginTop: 10, fontSize: 11.5, color: C.textFaint }}>Promotes a retrained candidate only when it beats the currently deployed model's F1 score.</div>
         </Card>
       </div>
+
+      {confirmOpen && (
+        <div onClick={() => setConfirmOpen(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(5,7,10,0.7)", backdropFilter: "blur(3px)", zIndex: 100,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: "90vw", background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,.45)", padding: 26 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Run a detection scan?</h3>
+            <p style={{ fontSize: 13, color: C.textMd, marginBottom: 18, lineHeight: 1.5 }}>
+              Trains a new candidate model instance via a fresh GA optimization pass over the full labeled dataset (~3 minutes),
+              then automatically promotes it to <strong style={{ fontFamily: C.mono, color: C.textHi }}>V{kpis.current_version + 1}</strong> only
+              if it beats the currently deployed <strong style={{ fontFamily: C.mono, color: C.textHi }}>V{kpis.current_version}</strong>. Otherwise
+              the candidate is archived and nothing changes. This is the same retrain cycle available from Model Management.
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={startScan}>Start Scan</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <Toast title={toast.title} sub={toast.sub} />}
     </div>
   );
 }
@@ -670,6 +746,7 @@ function SourcesPage() {
   const fileRef = useRef(null);
   const [toast, setToast] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [detailUpload, setDetailUpload] = useState(null);
 
   const { data: history, loading, error } = useApiData(() => apiGet("/api/sources/uploads"), [refreshKey]);
   const { data: connectorData } = useApiData(() => apiGet("/api/sources/connectors"), []);
@@ -703,7 +780,7 @@ function SourcesPage() {
   return (
     <div>
       <PageHeader title="Log Sources" sub="Upload log files and connect streaming sources for continuous ingestion"
-        right={<Button size="sm" icon={Plus}>Connect Source</Button>} />
+        right={<Button size="sm" icon={Plus} disabled title="Not implemented yet — only manual file upload is available">Connect Source</Button>} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 18, marginBottom: 18 }}>
         <Card>
@@ -756,7 +833,17 @@ function SourcesPage() {
                   </div>
                   {c.enabled
                     ? <Badge tone="success" dot>Enabled</Badge>
-                    : <Button variant="ghost" size="sm" style={{ marginLeft: "auto" }}>Connect</Button>}
+                    : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        style={{ marginLeft: "auto" }}
+                        disabled
+                        title={`${c.name} isn't implemented yet — coming soon`}
+                      >
+                        Coming soon
+                      </Button>
+                    )}
                 </div>
               );
             })}
@@ -773,32 +860,115 @@ function SourcesPage() {
             No uploads yet — drop a log file above to get started.
           </div>
         ) : (
-          <Table head={["File Name", "Source", "Size", "Records", "Uploaded", "Status", ""]}>
-            {rows.map((u) => (
-              <Row key={u.id}>
-                <Td title>
-                  {u.name}
-                  {u.status === "failed" && u.error && (
-                    <div style={{ fontSize: 11, fontWeight: 400, color: C.danger, marginTop: 3, whiteSpace: "normal", maxWidth: 340 }}>{u.error}</div>
-                  )}
-                </Td>
-                <Td>{u.source}</Td>
-                <Td mono>{formatBytes(u.size_bytes)}</Td>
-                <Td mono>
-                  <span title={u.total_lines != null ? `${u.total_lines.toLocaleString()} lines in file` : undefined}>
-                    {u.records != null ? u.records.toLocaleString() : "—"}
-                  </span>
-                </Td>
-                <Td mono>{formatTimestamp(u.uploaded_at)}</Td>
-                <Td>{u.status === "processed" ? <Badge tone="success" dot>Processed</Badge> : u.status === "processing" ? <Badge tone="warning">Processing</Badge> : <Badge tone="danger">Failed</Badge>}</Td>
-                <Td><MoreVertical size={14} color={C.textFaint} style={{ cursor: "pointer" }} /></Td>
-              </Row>
-            ))}
+          <Table head={["File Name", "Source", "Size", "Records", "Uploaded", "Status", "Anomalies", ""]}>
+            {rows.map((u) => {
+              const hasResults = u.status === "processed" && u.blocks_analyzed != null && u.blocks_analyzed > 0;
+              return (
+                <Row key={u.id}>
+                  <Td title>
+                    {u.name}
+                    {u.status === "failed" && u.error && (
+                      <div style={{ fontSize: 11, fontWeight: 400, color: C.danger, marginTop: 3, whiteSpace: "normal", maxWidth: 340 }}>{u.error}</div>
+                    )}
+                  </Td>
+                  <Td>{u.source}</Td>
+                  <Td mono>{formatBytes(u.size_bytes)}</Td>
+                  <Td mono>
+                    <span title={u.total_lines != null ? `${u.total_lines.toLocaleString("en-US")} lines in file` : undefined}>
+                      {u.records != null ? u.records.toLocaleString("en-US") : "—"}
+                    </span>
+                  </Td>
+                  <Td mono>{formatTimestamp(u.uploaded_at)}</Td>
+                  <Td>{u.status === "processed" ? <Badge tone="success" dot>Processed</Badge> : u.status === "processing" ? <Badge tone="warning">Processing</Badge> : <Badge tone="danger">Failed</Badge>}</Td>
+                  <Td mono>
+                    {hasResults ? (
+                      <span title={`Scored against V${u.model_version} — ${u.blocks_analyzed.toLocaleString("en-US")} blocks analyzed`}>
+                        <span style={{ color: u.anomalies_detected > 0 ? C.danger : C.success, fontWeight: 600 }}>
+                          {u.anomalies_detected.toLocaleString("en-US")}
+                        </span>
+                        <span style={{ color: C.textFaint }}> / {u.blocks_analyzed.toLocaleString("en-US")} ({u.anomaly_rate_pct}%)</span>
+                      </span>
+                    ) : "—"}
+                  </Td>
+                  <Td>
+                    {hasResults ? (
+                      <Button variant="ghost" size="sm" onClick={() => setDetailUpload(u)}>View</Button>
+                    ) : (
+                      <MoreVertical size={14} color={C.textFaint} />
+                    )}
+                  </Td>
+                </Row>
+              );
+            })}
           </Table>
         )}
       </Card>
 
       {toast && <Toast title={toast.title} sub={toast.sub} />}
+      {detailUpload && <UploadDetectionsModal upload={detailUpload} onClose={() => setDetailUpload(null)} />}
+    </div>
+  );
+}
+
+function UploadDetectionsModal({ upload, onClose }) {
+  const [page, setPage] = useState(1);
+  const limit = 10;
+  const { data, loading, error } = useApiData(
+    () => apiGet(`/api/sources/uploads/${upload.id}/detections`, { page, limit }),
+    [upload.id, page]
+  );
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1;
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(5,7,10,0.7)", backdropFilter: "blur(3px)", zIndex: 100,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: 640, maxWidth: "94vw", maxHeight: "82vh", overflow: "auto",
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+        boxShadow: "0 12px 40px rgba(0,0,0,.45)", padding: 26,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Detection results</h3>
+            <div style={{ fontSize: 12.5, color: C.textFaint, fontFamily: C.mono }}>{upload.name}</div>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+
+        <div style={{ display: "flex", gap: 20, margin: "18px 0", fontSize: 12.5, color: C.textMd }}>
+          <span>Blocks analyzed: <strong style={{ color: C.textHi, fontFamily: C.mono }}>{upload.blocks_analyzed.toLocaleString("en-US")}</strong></span>
+          <span>Anomalies: <strong style={{ color: C.danger, fontFamily: C.mono }}>{upload.anomalies_detected.toLocaleString("en-US")}</strong></span>
+          <span>Rate: <strong style={{ color: C.textHi, fontFamily: C.mono }}>{upload.anomaly_rate_pct}%</strong></span>
+          <span>Model: <strong style={{ color: C.textHi, fontFamily: C.mono }}>V{upload.model_version}</strong></span>
+        </div>
+
+        {error && <div style={{ color: C.danger, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+        <Table head={["Block ID", "Prediction", "Anomaly Score"]}>
+          {(data?.results || []).map((r) => (
+            <Row key={r.block_id}>
+              <Td title mono>{r.block_id}</Td>
+              <Td>{r.predicted_label === "Anomaly" ? <Badge tone="danger" dot>Anomaly</Badge> : <Badge tone="neutral">Normal</Badge>}</Td>
+              <Td mono>{r.anomaly_score.toFixed(4)}</Td>
+            </Row>
+          ))}
+        </Table>
+        {loading && <div style={{ padding: "20px 0" }}><PageLoading /></div>}
+
+        {data && data.total > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
+            <span style={{ fontSize: 12, color: C.textFaint }}>
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, data.total)} of {data.total.toLocaleString("en-US")}, sorted by score
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ opacity: page <= 1 ? 0.4 : 1 }}>Prev</Button>
+              <span style={{ fontSize: 12, color: C.textMd, fontFamily: C.mono, padding: "6px 4px" }}>Page {page} / {totalPages}</span>
+              <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} style={{ opacity: page >= totalPages ? 0.4 : 1 }}>Next</Button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -829,10 +999,10 @@ function DetectionPage() {
         right={<Button size="sm" icon={Download}>Export CSV</Button>} />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
-        <KpiCard label="Total Blocks Analyzed" value={summary ? summary.total_analyzed.toLocaleString() : "—"} />
-        <KpiCard label="Normal Blocks" value={summary ? summary.normal_count.toLocaleString() : "—"} valueColor={C.success}
+        <KpiCard label="Total Blocks Analyzed" value={summary ? summary.total_analyzed.toLocaleString("en-US") : "—"} />
+        <KpiCard label="Normal Blocks" value={summary ? summary.normal_count.toLocaleString("en-US") : "—"} valueColor={C.success}
           footer={summary && <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>{(summary.normal_count / summary.total_analyzed * 100).toFixed(2)}% of total</div>} />
-        <KpiCard label="Anomalous Blocks" value={summary ? summary.anomalous_count.toLocaleString() : "—"} valueColor={C.danger}
+        <KpiCard label="Anomalous Blocks" value={summary ? summary.anomalous_count.toLocaleString("en-US") : "—"} valueColor={C.danger}
           footer={summary && <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>{(summary.anomalous_count / summary.total_analyzed * 100).toFixed(2)}% of total</div>} />
         <KpiCard label="Avg. Anomaly Score" value={summary ? summary.avg_anomaly_score.toFixed(3) : "—"} valueColor={C.warning}
           footer={summary && <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>Contamination: {summary.contamination_threshold.toFixed(3)}</div>} />
@@ -870,7 +1040,7 @@ function DetectionPage() {
         {data && data.total > 0 && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderTop: `1px solid ${C.borderSoft}` }}>
             <span style={{ fontSize: 12, color: C.textFaint }}>
-              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, data.total)} of {data.total.toLocaleString()}
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, data.total)} of {data.total.toLocaleString("en-US")}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
               <Button size="sm" variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ opacity: page <= 1 ? 0.4 : 1 }}>Prev</Button>
@@ -1232,7 +1402,7 @@ export default function MorphGuardApp() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   const pages = {
-    dashboard: <DashboardPage />,
+    dashboard: <DashboardPage onNavigate={setPage} />,
     sources: <SourcesPage />,
     detection: <DetectionPage />,
     analytics: <AnalyticsPage />,
