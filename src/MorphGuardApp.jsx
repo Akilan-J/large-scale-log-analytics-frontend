@@ -61,7 +61,7 @@ export function useSystemTheme() {
   }, []);
 }
 
-const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning };
+const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning, refit: C.primary };
 
 // Maps the connector icon names the backend returns onto lucide components.
 const CONNECTOR_ICONS = {
@@ -438,9 +438,18 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
   );
 }
 
-function Topbar({ pageTitle }) {
+function Topbar({ pageTitle, onSearch }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const initials = initialsOf(currentUser());
+
+  // Ingestion state and the notification count come from the upload records
+  // rather than being painted on: the badge used to read "Ingestion Live"
+  // unconditionally, with a permanent unread dot beside it.
+  const { data: uploads } = useApiData(() => apiGet("/api/sources/uploads", { limit: 100 }), []);
+  const rows = uploads?.uploads || [];
+  const processing = rows.filter((u) => u.status === "processing").length;
+  const failed = rows.filter((u) => u.status === "failed").length;
 
   function handleLogout() {
     localStorage.removeItem("mg_token");
@@ -456,17 +465,32 @@ function Topbar({ pageTitle }) {
     }}>
       <div style={{ fontSize: 15, fontWeight: 600, color: C.textHi }}>{pageTitle}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <SearchBox value="" onChange={() => {}} placeholder="Search logs, events, models..." width={260} />
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.success,
-          background: C.successDim, border: "1px solid rgba(16,185,129,0.25)", padding: "6px 12px", borderRadius: 20,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.success, display: "inline-block" }} />
-          Ingestion Live
+        <form onSubmit={(e) => { e.preventDefault(); if (query.trim()) onSearch?.(query.trim()); }}>
+          <SearchBox value={query} onChange={setQuery} placeholder="Search block ID, component, IP…" width={260} />
+        </form>
+        <div
+          title={processing ? `${processing} file(s) being parsed` : "No files currently being parsed"}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
+            color: processing ? C.success : C.textLo,
+            background: processing ? C.successDim : C.bgRaised,
+            border: `1px solid ${processing ? "rgba(16,185,129,0.25)" : C.border}`,
+            padding: "6px 12px", borderRadius: 20, whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: processing ? C.success : C.textFaint, display: "inline-block" }} />
+          {processing ? `Ingesting ${processing}` : "Ingestion idle"}
         </div>
-        <div style={{ width: 36, height: 36, borderRadius: 8, background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMd, position: "relative" }}>
+        <div
+          title={failed ? `${failed} upload(s) failed` : "No alerts"}
+          style={{ width: 36, height: 36, borderRadius: 8, background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMd, position: "relative" }}
+        >
           <Bell size={17} />
-          <span style={{ position: "absolute", top: 7, right: 7, width: 7, height: 7, borderRadius: "50%", background: C.danger, boxShadow: `0 0 0 2px ${C.card}` }} />
+          {failed > 0 && (
+            <span style={{ position: "absolute", top: 4, right: 4, minWidth: 14, height: 14, padding: "0 3px", borderRadius: 7, background: C.danger, color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 0 2px ${C.card}` }}>
+              {failed > 9 ? "9+" : failed}
+            </span>
+          )}
         </div>
         <div style={{ position: "relative" }}>
           <div
@@ -497,8 +521,9 @@ function Topbar({ pageTitle }) {
   );
 }
 
-function DashboardPage() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), []);
+function DashboardPage({ onNavigate }) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), [refreshKey]);
 
   if (loading) return <PageLoading />;
   if (error) return <PageError message={error} />;
@@ -511,8 +536,8 @@ function DashboardPage() {
         title="Overview"
         sub={`Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
         right={<>
-          <Button size="sm" icon={Plus}>New Log Source</Button>
-          <Button size="sm" variant="primary" icon={RefreshCw}>Run Detection Scan</Button>
+          <Button size="sm" icon={Plus} onClick={() => onNavigate?.("sources")}>New Log Source</Button>
+          <Button size="sm" variant="primary" icon={RefreshCw} onClick={() => setRefreshKey((k) => k + 1)}>Refresh</Button>
         </>}
       />
 
@@ -532,9 +557,13 @@ function DashboardPage() {
             <CheckCircle2 size={18} />
           </div>
           <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Model Status</div>
-          <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Active <Badge tone="success" dot>Healthy</Badge></div>
+          <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+            V{kpis.current_version}
+            <Badge tone={kpis.model_status?.tone || "neutral"} dot>{kpis.model_status?.state || "unknown"}</Badge>
+          </div>
           <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>
-            {kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}% false positive rate` : "Serving all traffic"}
+            {kpis.model_status?.detail
+              || (kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}% false positive rate` : "No metrics recorded")}
           </div>
         </Card>
       </div>
@@ -703,7 +732,7 @@ function SourcesPage() {
   return (
     <div>
       <PageHeader title="Log Sources" sub="Upload log files and connect streaming sources for continuous ingestion"
-        right={<Button size="sm" icon={Plus}>Connect Source</Button>} />
+        right={<Button size="sm" icon={Plus} onClick={() => fileRef.current?.click()}>Upload Log File</Button>} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 18, marginBottom: 18 }}>
         <Card>
@@ -756,7 +785,7 @@ function SourcesPage() {
                   </div>
                   {c.enabled
                     ? <Badge tone="success" dot>Enabled</Badge>
-                    : <Button variant="ghost" size="sm" style={{ marginLeft: "auto" }}>Connect</Button>}
+                    : <Badge tone="neutral">Not implemented</Badge>}
                 </div>
               );
             })}
@@ -803,8 +832,8 @@ function SourcesPage() {
   );
 }
 
-function DetectionPage() {
-  const [search, setSearch] = useState("");
+function DetectionPage({ initialSearch = "" }) {
+  const [search, setSearch] = useState(initialSearch);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sev, setSev] = useState("all");
   const [page, setPage] = useState(1);
@@ -822,11 +851,30 @@ function DetectionPage() {
   );
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / limit)) : 1;
+  const items = data?.items || [];
+
+  // Exports the rows currently in view, matching the active search and filter.
+  function exportCsv() {
+    const columns = ["block_id", "timestamp", "component", "event_type", "source_ip", "destination_ip", "anomaly_score", "severity", "predicted_label", "true_label"];
+    const escape = (v) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [columns.join(","), ...items.map((r) => columns.map((c) => escape(r[c])).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `detections-page${page}${sev !== "all" ? `-${sev}` : ""}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div>
       <PageHeader title="Detection Results" sub="Block-level anomaly classification from the currently deployed Isolation Forest model"
-        right={<Button size="sm" icon={Download}>Export CSV</Button>} />
+        right={<Button size="sm" icon={Download} onClick={exportCsv} disabled={!items.length}>Export CSV</Button>} />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
         <KpiCard label="Total Blocks Analyzed" value={summary ? summary.total_analyzed.toLocaleString() : "—"} />
@@ -1094,7 +1142,7 @@ function ModelsPage() {
             <div>
               <div style={{ fontSize: 12, color: C.textLo, marginBottom: 8 }}>GA optimization in progress</div>
               <ProgressBar pct={Math.min(95, elapsed / 180 * 100)} color={C.warning} />
-              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 6 }}>Elapsed {elapsed}s · typically ~3 minutes</div>
+              <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 6 }}>Elapsed {elapsed}s</div>
             </div>
           ) : lastOutcome ? (
             <div>
@@ -1149,7 +1197,7 @@ function ModelsPage() {
           <div onClick={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: "90vw", background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,.45)", padding: 26 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Start a new retrain cycle?</h3>
             <p style={{ fontSize: 13, color: C.textMd, marginBottom: 18, lineHeight: 1.5 }}>
-              Runs a fresh GA optimization pass over the full labeled dataset (~3 minutes) to produce a candidate model,
+              Runs a fresh GA optimization pass over the currently built feature set to produce a candidate model,
               then automatically promotes it to <strong style={{ fontFamily: C.mono, color: C.textHi }}>V{current.version + 1}</strong> only
               if its F1 score beats the currently deployed <strong style={{ fontFamily: C.mono, color: C.textHi }}>V{current.version}</strong> (F1: {(current.metrics?.f1 || 0).toFixed(4)}).
               Otherwise the candidate is archived and nothing changes.
@@ -1230,11 +1278,14 @@ export default function MorphGuardApp() {
   useSystemTheme();
   const [page, setPage] = useState("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  // Remounts DetectionPage so a new topbar search replaces the previous one
+  // rather than being ignored as a stale initial value.
+  const [search, setSearch] = useState({ term: "", n: 0 });
 
   const pages = {
-    dashboard: <DashboardPage />,
+    dashboard: <DashboardPage onNavigate={setPage} />,
     sources: <SourcesPage />,
-    detection: <DetectionPage />,
+    detection: <DetectionPage key={search.n} initialSearch={search.term} />,
     analytics: <AnalyticsPage />,
     models: <ModelsPage />,
     settings: <SettingsPage />,
@@ -1259,7 +1310,10 @@ export default function MorphGuardApp() {
       <Sidebar active={page} setActive={setPage} expanded={sidebarExpanded} setExpanded={setSidebarExpanded} />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <Topbar pageTitle={titles[page]} />
+        <Topbar
+          pageTitle={titles[page]}
+          onSearch={(term) => { setSearch((s) => ({ term, n: s.n + 1 })); setPage("detection"); }}
+        />
         <main style={{ padding: 28, flex: 1 }}>
           {pages[page]}
         </main>
