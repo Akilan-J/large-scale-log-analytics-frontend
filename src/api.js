@@ -1,4 +1,8 @@
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+// 127.0.0.1, not "localhost": on macOS localhost resolves to IPv6 ::1 first,
+// and the Flask dev server binds IPv4, so "localhost" sent the browser to
+// ::1:5000 and every request died as an unexplained "Failed to fetch".
+// Pinning the loopback address keeps the two on the same stack.
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000";
 
 export const TOKEN_KEY = "mg_token";
 export const USER_KEY = "mg_user";
