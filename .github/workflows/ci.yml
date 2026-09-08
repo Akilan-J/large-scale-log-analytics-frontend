@@ -1,0 +1,29 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        # No test suite or linter is configured for this project (see
+        # CLAUDE.md) — a clean production build is the main thing worth
+        # gating on: it fails on JSX/syntax errors, missing imports, and
+        # bad third-party API usage the dev server's HMR can silently
+        # tolerate.
+        run: npm run build
