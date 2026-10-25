@@ -506,8 +506,14 @@ function DashboardPage({ onNavigate }) {
   const [job, setJob] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  // "auto" reports on the most recently uploaded log file; "dataset" goes back
+  // to the full deployed dataset.
+  const [scope, setScope] = useState("auto");
 
-  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), [refreshKey]);
+  const { data, loading, error } = useApiData(
+    () => apiGet("/api/dashboard", scope === "dataset" ? { scope: "dataset" } : {}),
+    [refreshKey, scope]
+  );
 
   // Same global retrain job Model Management drives — the backend only ever
   // runs one at a time, so this is a second entry point onto that one job,
@@ -554,14 +560,23 @@ function DashboardPage({ onNavigate }) {
   if (loading) return <PageLoading />;
   if (error) return <PageError message={error} />;
 
-  const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range } = data;
+  const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range, view } = data;
+  const onUpload = view?.mode === "upload";
 
   return (
     <div>
       <PageHeader
         title="Overview"
-        sub={`Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
+        badge={onUpload
+          ? <Badge tone="warning">Uploaded File</Badge>
+          : <Badge tone="primary">Full Dataset</Badge>}
+        sub={onUpload
+          ? `Detection results for ${view.upload.name} — ${kpis.total_blocks_analyzed.toLocaleString("en-US")} blocks from ${kpis.total_logs_processed.toLocaleString("en-US")} log lines (${formatDateRange(date_range)})`
+          : `Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
         right={<>
+          {onUpload
+            ? <Button size="sm" onClick={() => setScope("dataset")}>View Full Dataset</Button>
+            : <Button size="sm" onClick={() => setScope("auto")}>View Latest Upload</Button>}
           <Button size="sm" icon={Plus} onClick={() => onNavigate("sources")}>New Log Source</Button>
           <Button size="sm" variant="primary" icon={RefreshCw} onClick={() => setConfirmOpen(true)} disabled={isRunning}>
             {isRunning ? `Training… ${elapsed}s` : "Run Detection Scan"}
@@ -718,11 +733,14 @@ function LineageMini() {
   );
 }
 
-function PageHeader({ title, sub, right }) {
+function PageHeader({ title, sub, right, badge }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
       <div>
-        <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.3px" }}>{title}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.3px" }}>{title}</div>
+          {badge}
+        </div>
         <div style={{ fontSize: 13, color: C.textLo, marginTop: 4 }}>{sub}</div>
       </div>
       {right && <div style={{ display: "flex", gap: 10 }}>{right}</div>}
@@ -931,10 +949,16 @@ function UploadDetectionsModal({ upload, onClose }) {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
           <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Detection results</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Detection results</h3>
+              <Badge tone="primary">This Upload</Badge>
+            </div>
             <div style={{ fontSize: 12.5, color: C.textFaint, fontFamily: C.mono }}>{upload.name}</div>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+        <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>
+          This file's own scan. Blocks the dataset hadn't seen before are also counted in the Overview and Detection Results totals; blocks it already had are not counted twice.
         </div>
 
         <div style={{ display: "flex", gap: 20, margin: "18px 0", fontSize: 12.5, color: C.textMd }}>
@@ -995,7 +1019,9 @@ function DetectionPage() {
 
   return (
     <div>
-      <PageHeader title="Detection Results" sub="Block-level anomaly classification from the currently deployed Isolation Forest model"
+      <PageHeader title="Detection Results"
+        badge={<Badge tone="primary">All Ingested Data</Badge>}
+        sub="Block-level anomaly classification from the currently deployed Isolation Forest model — the base dataset plus every block ingested through Log Sources"
         right={<Button size="sm" icon={Download}>Export CSV</Button>} />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
