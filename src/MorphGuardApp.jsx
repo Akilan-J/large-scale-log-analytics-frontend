@@ -506,8 +506,14 @@ function DashboardPage({ onNavigate }) {
   const [job, setJob] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  // "auto" reports on the most recently uploaded log file; "dataset" goes back
+  // to the full deployed dataset.
+  const [scope, setScope] = useState("auto");
 
-  const { data, loading, error } = useApiData(() => apiGet("/api/dashboard"), [refreshKey]);
+  const { data, loading, error } = useApiData(
+    () => apiGet("/api/dashboard", scope === "dataset" ? { scope: "dataset" } : {}),
+    [refreshKey, scope]
+  );
 
   // Same global retrain job Model Management drives — the backend only ever
   // runs one at a time, so this is a second entry point onto that one job,
@@ -554,19 +560,23 @@ function DashboardPage({ onNavigate }) {
   if (loading) return <PageLoading />;
   if (error) return <PageError message={error} />;
 
-  const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range } = data;
+  const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range, view } = data;
+  const onUpload = view?.mode === "upload";
 
   return (
     <div>
       <PageHeader
         title="Overview"
-        badge={<Badge tone="primary">All Ingested Data</Badge>}
-        sub={`Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})${
-          kpis.uploaded_blocks_added
-            ? ` + ${kpis.uploaded_blocks_added.toLocaleString("en-US")} new blocks ingested from Log Source uploads`
-            : " — Log Source uploads add any blocks the dataset hasn't seen before"
-        }`}
+        badge={onUpload
+          ? <Badge tone="warning">Uploaded File</Badge>
+          : <Badge tone="primary">Full Dataset</Badge>}
+        sub={onUpload
+          ? `Detection results for ${view.upload.name} — ${kpis.total_blocks_analyzed.toLocaleString("en-US")} blocks from ${kpis.total_logs_processed.toLocaleString("en-US")} log lines (${formatDateRange(date_range)})`
+          : `Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
         right={<>
+          {onUpload
+            ? <Button size="sm" onClick={() => setScope("dataset")}>View Full Dataset</Button>
+            : <Button size="sm" onClick={() => setScope("auto")}>View Latest Upload</Button>}
           <Button size="sm" icon={Plus} onClick={() => onNavigate("sources")}>New Log Source</Button>
           <Button size="sm" variant="primary" icon={RefreshCw} onClick={() => setConfirmOpen(true)} disabled={isRunning}>
             {isRunning ? `Training… ${elapsed}s` : "Run Detection Scan"}
