@@ -64,6 +64,17 @@ export function useSystemTheme() {
 const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning, rollback: C.warning, refit: C.primary };
 
 // Maps the connector icon names the backend returns onto lucide components.
+// Connector status from /api/sources/connectors: what works now, what can be
+// started, and what is future work (with the reason in its detail line).
+const CONNECTOR_BADGE = {
+  active: { tone: "success", label: "Active" },
+  live: { tone: "success", label: "Live" },
+  idle: { tone: "primary", label: "Idle" },
+  available: { tone: "primary", label: "Available" },
+  unknown: { tone: "warning", label: "Unknown" },
+  future: { tone: "neutral", label: "Future work" },
+};
+
 const CONNECTOR_ICONS = {
   Database, Cloud, Server, Waypoints, ListTree, FileText,
 };
@@ -507,6 +518,33 @@ function SourcePicker() {
   );
 }
 
+// Real stream state (it used to be a fixed green "Ingestion Live"): polls the
+// newest processor run and says Live only while one is reporting.
+function StreamBadge() {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => apiGet("/api/stream/status")
+      .then((s) => { if (!cancelled) setState(s.live ? { live: true, source: s.source || "hdfs", rate: s.events_per_sec } : { live: false }); })
+      .catch(() => { if (!cancelled) setState({ live: false }); });
+    poll();
+    const timer = setInterval(poll, 10000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+  const live = state?.live;
+  return (
+    <div title={live ? `${sourceLabel(state.source)} stream, ${Math.round(state.rate || 0).toLocaleString("en-US")} events/s` : "No stream processor is running"}
+      style={{
+        display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
+        color: live ? C.success : C.textFaint, background: live ? C.successDim : C.card,
+        border: `1px solid ${live ? "rgba(16,185,129,0.25)" : C.border}`, padding: "6px 12px", borderRadius: 20,
+      }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: live ? C.success : C.textFaint, display: "inline-block" }} />
+      {live ? `Stream live · ${sourceLabel(state.source)}` : "Stream idle"}
+    </div>
+  );
+}
+
 function Topbar({ pageTitle, showSource }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const initials = initialsOf(currentUser());
@@ -526,17 +564,7 @@ function Topbar({ pageTitle, showSource }) {
       <div style={{ fontSize: 15, fontWeight: 600, color: C.textHi }}>{pageTitle}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         {showSource && <SourcePicker />}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.success,
-          background: C.successDim, border: "1px solid rgba(16,185,129,0.25)", padding: "6px 12px", borderRadius: 20,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.success, display: "inline-block" }} />
-          Ingestion Live
-        </div>
-        <div style={{ width: 36, height: 36, borderRadius: 8, background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMd, position: "relative" }}>
-          <Bell size={17} />
-          <span style={{ position: "absolute", top: 7, right: 7, width: 7, height: 7, borderRadius: "50%", background: C.danger, boxShadow: `0 0 0 2px ${C.card}` }} />
-        </div>
+        <StreamBadge />
         <div style={{ position: "relative" }}>
           <div
             onClick={() => setMenuOpen((v) => !v)}
@@ -1015,35 +1043,26 @@ function SourcesPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Supported Sources" meta="Future-ready connectors" />
+          <CardHeader title="Connectors" meta="Live status from the server" />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
             {connectors.map((c) => {
               const Icon = CONNECTOR_ICONS[c.icon] || Database;
+              const badge = CONNECTOR_BADGE[c.status] || CONNECTOR_BADGE.future;
               return (
-                <div key={c.name} style={{
-                  display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", border: `1px solid ${C.border}`,
-                  borderRadius: 8, background: C.bgRaised, opacity: c.enabled ? 1 : 0.45,
+                <div key={c.name} title={c.detail} style={{
+                  display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 16px", border: `1px solid ${C.border}`,
+                  borderRadius: 8, background: C.bgRaised, opacity: c.status === "future" ? 0.6 : 1,
                 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c.enabled ? C.primaryDim : C.bg, color: c.enabled ? C.primary : C.textFaint }}>
                     <Icon size={18} />
                   </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: c.enabled ? C.textHi : C.textMd }}>{c.name}</div>
-                    <div style={{ fontSize: 11.5, color: C.textFaint }}>{c.enabled ? "Active" : "Not connected"}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: c.enabled ? C.textHi : C.textMd }}>{c.name}</div>
+                      <Badge tone={badge.tone} dot={c.status === "live" || c.status === "active"}>{badge.label}</Badge>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 4, lineHeight: 1.45, wordBreak: "break-word" }}>{c.detail}</div>
                   </div>
-                  {c.enabled
-                    ? <Badge tone="success" dot>Enabled</Badge>
-                    : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        style={{ marginLeft: "auto" }}
-                        disabled
-                        title={`${c.name} isn't implemented yet — coming soon`}
-                      >
-                        Coming soon
-                      </Button>
-                    )}
                 </div>
               );
             })}
@@ -1675,6 +1694,8 @@ function policyParams(policy, config) {
     ...(config.warm_ref_fraction != null && { warm_ref_fraction: config.warm_ref_fraction }),
     weights: { ...policy.weights },
     split: "holdout",
+    // The Settings page's saved target, else the policy's own.
+    ...(readRetentionTarget() != null && { retention_target: readRetentionTarget() }),
   };
 }
 
@@ -1885,6 +1906,7 @@ const ALERTS_POLL_MS = 4000;
 const RATE_HISTORY = 60;
 
 function LiveStreamPage() {
+  const source = useSource();
   const [status, setStatus] = useState(null);
   const [statusError, setStatusError] = useState(null);
   const [series, setSeries] = useState([]);
@@ -1895,7 +1917,7 @@ function LiveStreamPage() {
     let cancelled = false;
     async function tick() {
       try {
-        const s = await apiGet("/api/stream/status");
+        const s = await apiGet("/api/stream/status", { source });
         if (cancelled) return;
         setStatus(s);
         setStatusError(null);
@@ -1914,7 +1936,7 @@ function LiveStreamPage() {
     let cancelled = false;
     async function tick() {
       try {
-        const data = await apiGet("/api/stream/alerts", { limit: 50, type: alertType === "all" ? undefined : alertType });
+        const data = await apiGet("/api/stream/alerts", { source, limit: 50, type: alertType === "all" ? undefined : alertType });
         if (!cancelled) setAlerts(data);
       } catch {
         // keep the last good list; the status card already reports outages
@@ -2044,15 +2066,128 @@ function LiveStreamPage() {
   );
 }
 
+const RETENTION_KEY = "mg_retention_target";
+
+function readRetentionTarget() {
+  try {
+    const value = parseFloat(localStorage.getItem(RETENTION_KEY));
+    return value >= 0.5 && value <= 1 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function Field({ label, children, hint }) {
+  return (
+    <label style={{ display: "block", marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: C.textLo, marginBottom: 6, fontWeight: 500 }}>{label}</div>
+      {children}
+      {hint && <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 5 }}>{hint}</div>}
+    </label>
+  );
+}
+
+const inputStyle = {
+  width: "100%", background: C.bgRaised, color: C.textHi, border: `1px solid ${C.border}`, borderRadius: 8,
+  padding: "9px 12px", fontSize: 13, fontFamily: C.sans,
+};
+
 function SettingsPage() {
+  const { source, setSource } = useContext(SourceCtx);
+  const { data: me, error: meError } = useApiData(() => apiGet("/api/auth/me"), []);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [pwState, setPwState] = useState(null); // { ok, message }
+  const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState(() => readRetentionTarget() ?? 0.95);
+  const [saved, setSaved] = useState(false);
+
+  async function changePassword(e) {
+    e.preventDefault();
+    if (next !== confirm) { setPwState({ ok: false, message: "The new passwords don't match." }); return; }
+    setBusy(true);
+    try {
+      await apiPost("/api/auth/change-password", { current_password: current, new_password: next });
+      setPwState({ ok: true, message: "Password changed." });
+      setCurrent(""); setNext(""); setConfirm("");
+    } catch (err) {
+      setPwState({ ok: false, message: err.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function saveTarget() {
+    try { localStorage.setItem(RETENTION_KEY, String(target)); } catch {}
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  const user = me || currentUser() || {};
   return (
     <div>
-      <PageHeader title="Settings" sub="Workspace, alerting, and account preferences" />
-      <Card style={{ padding: "48px 20px", textAlign: "center" }}>
-        <Settings size={40} color={C.textFaint} style={{ margin: "0 auto 14px", opacity: 0.5 }} />
-        <div style={{ fontWeight: 600, color: C.textMd }}>Out of scope for this prototype</div>
-        <div style={{ fontSize: 12.5, color: C.textFaint, marginTop: 4 }}>Wired up in the sitemap — see the accompanying design document.</div>
-      </Card>
+      <PageHeader title="Settings" sub="Your account and how the dashboard opens" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        <Card>
+          <CardHeader title="Account" />
+          <Table head={["", ""]}>
+            {[
+              ["Name", user.name || "—"],
+              ["Email", user.email || "—"],
+              ["Member since", me?.created_at ? formatTimestamp(me.created_at) : "—"],
+            ].map(([k, v]) => <Row key={k}><Td title>{k}</Td><Td mono>{v}</Td></Row>)}
+          </Table>
+          {meError && <div style={{ fontSize: 12, color: C.warning, marginTop: 8 }}>{meError}</div>}
+          <div style={{ fontSize: 12, color: C.textFaint, marginTop: 12 }}>
+            Passwords are stored as bcrypt hashes. Sessions last 24 hours.
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="Change Password" />
+          <form onSubmit={changePassword}>
+            <Field label="Current password">
+              <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} style={inputStyle} required />
+            </Field>
+            <Field label="New password" hint="At least 8 characters.">
+              <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} style={inputStyle} minLength={8} required />
+            </Field>
+            <Field label="Confirm new password">
+              <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} required />
+            </Field>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button type="submit" disabled={busy} style={{
+                background: C.primary, color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px",
+                fontSize: 13, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+              }}>{busy ? "Saving…" : "Change password"}</button>
+              {pwState && <span style={{ fontSize: 12.5, color: pwState.ok ? C.success : C.danger }}>{pwState.message}</span>}
+            </div>
+          </form>
+        </Card>
+
+        <Card>
+          <CardHeader title="Default Log Source" />
+          <Field label="Source the data pages open on" hint="Also switchable from the top bar on every data page. Saved in this browser.">
+            <select value={source} onChange={(e) => setSource(e.target.value)} style={inputStyle}>
+              {SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </Field>
+        </Card>
+
+        <Card>
+          <CardHeader title="Smart Storage" />
+          <Field label={`Retention target for the simulator: ${pct(target, 0)}`}
+            hint="The share of anomalies a simulated policy must keep. The tuned policy itself was optimised for 95%.">
+            <input type="range" min={0.8} max={1} step={0.01} value={target} onChange={(e) => setTarget(parseFloat(e.target.value))} style={{ width: "100%" }} />
+          </Field>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Button size="sm" variant="primary" onClick={saveTarget}>Save</Button>
+            {saved && <span style={{ fontSize: 12.5, color: C.success }}>Saved</span>}
+          </div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginTop: 14 }}>Theme follows your system's light or dark setting.</div>
+        </Card>
+      </div>
     </div>
   );
 }
