@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { apiGet, apiPost, apiUpload } from "./api.js";
 import {
   LayoutDashboard, Database, ShieldAlert, BarChart3, GitBranch, Settings,
   Search, Bell, ChevronLeft, Plus, RefreshCw, UploadCloud, Download,
   MoreVertical, ArrowUp, ArrowDown, CheckCircle2, Cloud, Server, Waypoints,
-  ListTree, AlertTriangle, FileText, X, Check
+  ListTree, AlertTriangle, FileText, X, Check, HardDrive, Activity, Radio, Zap
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, PieChart, Pie, Cell, LineChart, AreaChart, Area, BarChart
+  Tooltip, Legend, PieChart, Pie, Cell, LineChart, AreaChart, Area, BarChart, ReferenceLine
 } from "recharts";
 
 const DARK_THEME = {
@@ -78,6 +78,8 @@ const navSections = [
     { key: "sources", label: "Log Sources", Icon: Database },
     { key: "detection", label: "Detection Results", Icon: ShieldAlert },
     { key: "analytics", label: "Analytics", Icon: BarChart3 },
+    { key: "storage", label: "Smart Storage", Icon: HardDrive },
+    { key: "stream", label: "Live Stream", Icon: Activity },
   ]},
   { label: "System", items: [
     { key: "models", label: "Model Management", Icon: GitBranch },
@@ -88,6 +90,7 @@ const navSections = [
 const titles = {
   dashboard: "Dashboard", sources: "Log Sources", detection: "Detection Results",
   analytics: "Analytics", models: "Model Management", settings: "Settings",
+  storage: "Smart Storage", stream: "Live Stream",
 };
 
 function currentUser() {
@@ -675,6 +678,8 @@ function DashboardPage({ onNavigate }) {
         </Card>
       </div>
 
+      <EarlyWarningCard />
+
       {confirmOpen && (
         <div onClick={() => setConfirmOpen(false)} style={{
           position: "fixed", inset: 0, background: "rgba(5,7,10,0.7)", backdropFilter: "blur(3px)", zIndex: 100,
@@ -698,6 +703,69 @@ function DashboardPage({ onNavigate }) {
 
       {toast && <Toast title={toast.title} sub={toast.sub} />}
     </div>
+  );
+}
+
+function formatDuration(seconds) {
+  if (seconds == null) return "—";
+  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} h`;
+  if (seconds >= 60) return `${(seconds / 60).toFixed(1)} min`;
+  return `${Math.round(seconds)} s`;
+}
+
+// Held-out early-warning results per prefix length k (/api/early-warning/summary).
+// Fetched on its own so a missing report only empties this card, not the dashboard.
+function EarlyWarningCard() {
+  const { data, loading, error } = useApiData(() => apiGet("/api/early-warning/summary"), []);
+  const bestK = data?.trade_off_in_progress?.best_k ?? data?.trade_off?.best_k;
+  return (
+    <Card padded={false} style={{ marginTop: 18 }}>
+      <div style={{ padding: "20px 22px 0" }}>
+        <CardHeader
+          title="Early Warning"
+          meta={data ? `held-out test blocks · lead time = how far ahead of the block's last event a correct alert fires` : ""}
+        />
+      </div>
+      {loading ? <PageLoading /> : error ? (
+        <div style={{ padding: "0 22px 22px", color: C.textFaint, fontSize: 12.5 }}>{error}</div>
+      ) : (
+        <Table head={["k (first events)", "Precision", "Recall", "F1", "Lead, all true alerts", "Still running: F1", "Lead share", "Median lead", "Mean lead"]}>
+          {data.table.map((row) => {
+            const running = row.in_progress;
+            return (
+              <Row key={row.k}>
+                <Td mono title>
+                  {row.k}{" "}
+                  {row.k === bestK && <Badge tone="success">Best trade-off</Badge>}
+                </Td>
+                <Td mono>{row.precision.toFixed(3)}</Td>
+                <Td mono>{row.recall.toFixed(3)}</Td>
+                <Td mono>{row.f1.toFixed(3)}</Td>
+                <Td mono>{pct(row.mean_lead_over_true_alerts)} of events</Td>
+                <Td mono>{running ? running.f1.toFixed(3) : "—"}</Td>
+                <Td mono>{running ? `${pct(running.mean_lead_over_true_alerts)} of events` : "—"}</Td>
+                <Td mono>
+                  <span title={running?.median_lead_seconds != null ? `${Math.round(running.median_lead_seconds).toLocaleString("en-US")} s` : undefined}>
+                    {formatDuration(running?.median_lead_seconds)}
+                  </span>
+                </Td>
+                <Td mono>
+                  <span title={running?.mean_lead_seconds != null ? `${Math.round(running.mean_lead_seconds).toLocaleString("en-US")} s` : undefined}>
+                    {formatDuration(running?.mean_lead_seconds)}
+                  </span>
+                </Td>
+              </Row>
+            );
+          })}
+        </Table>
+      )}
+      {data && (
+        <div style={{ padding: "12px 22px 18px", fontSize: 11.5, color: C.textFaint, lineHeight: 1.5 }}>
+          "Still running" counts only blocks with more than k events, where an alert can come before the block ends; the
+          lead columns there cover correct alerts only. Seconds are log time from the k-th event to the block's last event.
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -770,6 +838,11 @@ function SourcesPage() {
   const { data: connectorData } = useApiData(() => apiGet("/api/sources/connectors"), []);
   const rows = history?.uploads || [];
   const connectors = connectorData?.connectors || [];
+  // Which log type an upload is parsed and scored as; the list (and whether
+  // each has a trained model) comes from the backend.
+  const logSources = connectorData?.log_sources || [];
+  const [logSource, setLogSource] = useState("hdfs");
+  const sourceLabel = Object.fromEntries(logSources.map((s) => [s.value, s.label]));
 
   // A just-uploaded file parses in the background, so poll while anything is
   // still processing and stop once every row has settled.
@@ -784,8 +857,8 @@ function SourcesPage() {
     if (!file) return;
     setUpload({ name: file.name, pct: 0 });
     try {
-      await apiUpload("/api/sources/upload", file, (pct) => setUpload({ name: file.name, pct }));
-      setToast({ title: "Upload complete", sub: `${file.name} is queued for analysis` });
+      await apiUpload("/api/sources/upload", file, (pct) => setUpload({ name: file.name, pct }), { source: logSource });
+      setToast({ title: "Upload complete", sub: `${file.name} is queued for analysis as ${sourceLabel[logSource] || logSource}` });
       setRefreshKey((k) => k + 1);
     } catch (err) {
       setToast({ title: "Upload failed", sub: err.message });
@@ -803,6 +876,25 @@ function SourcesPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 18, marginBottom: 18 }}>
         <Card>
           <CardHeader title="Upload Log File" />
+          {logSources.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Log source</div>
+              <select
+                value={logSource}
+                onChange={(e) => setLogSource(e.target.value)}
+                style={{
+                  width: "100%", background: C.bgRaised, color: C.textHi, border: `1px solid ${C.border}`, borderRadius: 8,
+                  padding: "8px 10px", fontSize: 13, fontFamily: C.sans, cursor: "pointer",
+                }}
+              >
+                {logSources.map((s) => (
+                  <option key={s.value} value={s.value} disabled={!s.trained}>
+                    {s.label}{s.trained ? "" : " — no trained model yet"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -817,9 +909,9 @@ function SourcesPage() {
               <UploadCloud size={24} />
             </div>
             <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 4 }}>Drag &amp; drop log files</div>
-            <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 14 }}>.log, .json, .csv, .txt — up to 500MB</div>
+            <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 14 }}>.log, .json, .json.gz, .csv, .txt — up to 500MB</div>
             <Button variant="primary" size="sm" onClick={(e) => { e.stopPropagation(); fileRef.current.click(); }}>Browse Files</Button>
-            <input ref={fileRef} type="file" accept=".log,.json,.csv,.txt" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
+            <input ref={fileRef} type="file" accept=".log,.json,.gz,.csv,.txt" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
           </div>
           {upload && (
             <div style={{ marginTop: 14 }}>
@@ -878,7 +970,7 @@ function SourcesPage() {
             No uploads yet — drop a log file above to get started.
           </div>
         ) : (
-          <Table head={["File Name", "Source", "Size", "Records", "Uploaded", "Status", "Anomalies", ""]}>
+          <Table head={["File Name", "Source", "Log Type", "Size", "Records", "Uploaded", "Status", "Anomalies", ""]}>
             {rows.map((u) => {
               const hasResults = u.status === "processed" && u.blocks_analyzed != null && u.blocks_analyzed > 0;
               return (
@@ -890,6 +982,7 @@ function SourcesPage() {
                     )}
                   </Td>
                   <Td>{u.source}</Td>
+                  <Td>{sourceLabel[u.log_source] || u.log_source}</Td>
                   <Td mono>{formatBytes(u.size_bytes)}</Td>
                   <Td mono>
                     <span title={u.total_lines != null ? `${u.total_lines.toLocaleString("en-US")} lines in file` : undefined}>
@@ -906,6 +999,8 @@ function SourcesPage() {
                         </span>
                         <span style={{ color: C.textFaint }}> / {u.blocks_analyzed.toLocaleString("en-US")} ({u.anomaly_rate_pct}%)</span>
                       </span>
+                    ) : u.status === "processed" && u.results_available === false ? (
+                      <span title={u.results_note} style={{ color: C.textFaint, borderBottom: `1px dotted ${C.textFaint}`, cursor: "help" }}>not on this server</span>
                     ) : "—"}
                   </Td>
                   <Td>
@@ -1393,6 +1488,409 @@ function MetricBlock({ label, value, color, small }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Smart Storage (/api/storage/*)
+// ---------------------------------------------------------------------------
+
+const TIERS = ["HOT", "WARM", "COLD"];
+const TIER_COLOR = { HOT: C.danger, WARM: C.warning, COLD: C.primary };
+// Display names for the report's baseline keys; every number comes from the API.
+const POLICY_LABELS = {
+  ga_policy: "GA policy",
+  keep_all: "Keep all",
+  keep_flagged_only: "Flagged only",
+  top_k_percent_tuned: "Top-k% (tuned)",
+  top_k_percent_same_savings: "Top-k% (same saving)",
+  random_sampling_same_savings: "Random (same saving)",
+};
+
+function pct(fraction, digits = 1) {
+  return fraction == null ? "—" : `${(fraction * 100).toFixed(digits)}%`;
+}
+
+function shareOf(part, whole) {
+  return whole ? Math.round((part / whole) * 1000) / 10 : 0;
+}
+
+function Slider({ label, value, min, max, step, onChange, format = (v) => v.toFixed(3), hint }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+        <span style={{ color: C.textMd, fontWeight: 500 }} title={hint}>{label}</span>
+        <span style={{ fontFamily: C.mono, color: C.textHi }}>{format(value)}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", accentColor: C.primary, cursor: "pointer" }}
+      />
+    </div>
+  );
+}
+
+function policyParams(policy, warmCredit) {
+  return {
+    t_hot: policy.thresholds.hot,
+    t_warm: policy.thresholds.warm,
+    summary_fraction: policy.summary_fraction,
+    warm_credit: warmCredit,
+    weights: { ...policy.weights },
+    split: "holdout",
+  };
+}
+
+function SmartStoragePage() {
+  const { data, loading, error } = useApiData(() => apiGet("/api/storage/summary"), []);
+  const [params, setParams] = useState(null);
+  const [sim, setSim] = useState(null);
+  const [simError, setSimError] = useState(null);
+  const [simBusy, setSimBusy] = useState(false);
+
+  useEffect(() => {
+    if (data && !params) setParams(policyParams(data.policy, data.config.warm_credit));
+  }, [data, params]);
+
+  // Debounced so dragging a slider sends one request when it settles, not one per pixel.
+  useEffect(() => {
+    if (!params) return;
+    let cancelled = false;
+    setSimBusy(true);
+    const timer = setTimeout(async () => {
+      try {
+        const result = await apiPost("/api/storage/simulate", params);
+        if (!cancelled) { setSim(result); setSimError(null); }
+      } catch (err) {
+        if (!cancelled) setSimError(err.message);
+      } finally {
+        if (!cancelled) setSimBusy(false);
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [params]);
+
+  // Memoized on the report: simulator updates re-render this page, and fresh
+  // arrays on every render would make Recharts re-lay-out the bar charts.
+  const tierData = useMemo(() => data && TIERS.map((tier) => ({
+    tier,
+    blocks: shareOf(data.holdout.tier_counts[tier], data.holdout.n_blocks),
+    lines: shareOf(data.holdout.tier_lines[tier], data.holdout.kept_lines),
+  })), [data]);
+  const comparisonRows = useMemo(() => (data?.holdout_comparison || []).map((row) => ({
+    name: POLICY_LABELS[row.name] || row.name,
+    saved: Math.round(row.clean.storage_saved_pct * 10) / 10,
+    retention: Math.round(row.clean.weighted_retention * 1000) / 10,
+    meets: row.clean.meets_retention_target,
+  })), [data]);
+
+  if (loading) return <PageLoading />;
+  if (error) return <PageError message={error} />;
+
+  const h = data.holdout;
+  const target = data.config.retention_target;
+  const policy = data.policy;
+
+  const set = (patch) => setParams((p) => {
+    const next = { ...p, ...patch };
+    // The policy requires t_warm < t_hot; keep the warm slider below the hot one.
+    if (next.t_warm >= next.t_hot) next.t_warm = Math.max(0, Math.round((next.t_hot - 0.005) * 1000) / 1000);
+    return next;
+  });
+  const setWeight = (name, value) => setParams((p) => ({ ...p, weights: { ...p.weights, [name]: value } }));
+  const o = sim?.outcome;
+
+  return (
+    <div>
+      <PageHeader
+        title="Smart Storage"
+        badge={data.stale ? <Badge tone="warning">Stale — re-run the optimizer</Badge> : <Badge tone="primary">Held-out Blocks</Badge>}
+        sub={`GA-tuned retention policy, tuned on ${data.split.tune.blocks.toLocaleString("en-US")} blocks and measured on ${data.split.holdout.blocks.toLocaleString("en-US")} held-out ones`}
+      />
+
+      <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
+        <KpiCard label="Storage Saved" value={`${h.storage_saved_pct.toFixed(1)}%`} icon={HardDrive} iconBg={C.primaryDim} iconColor={C.primary}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{h.kept_lines.toLocaleString("en-US")} of {h.total_lines.toLocaleString("en-US")} lines kept</div>} />
+        <KpiCard label="Anomaly Retention (weighted)" value={pct(h.weighted_retention)} icon={ShieldAlert}
+          iconBg={h.meets_retention_target ? C.successDim : C.warningDim} iconColor={h.meets_retention_target ? C.success : C.warning}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>target {pct(target, 0)} — {h.meets_retention_target ? "met" : "not met"}</div>} />
+        <KpiCard label="Full Retention (HOT only)" value={pct(h.full_retention)} icon={CheckCircle2} iconBg={C.successDim} iconColor={C.success}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{h.tier_anomalies.HOT.toLocaleString("en-US")} of {h.n_anomalies.toLocaleString("en-US")} anomalies kept in full</div>} />
+        <KpiCard label="Coverage (HOT + WARM)" value={pct(h.coverage)} icon={Activity} iconBg="rgba(34,211,238,0.12)" iconColor={C.cyan}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>WARM credit {data.config.warm_credit}</div>} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 18, marginBottom: 18 }}>
+        <ChartCard title="Tier Split" meta="share of held-out blocks vs. share of lines kept">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={tierData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <CartesianGrid stroke={C.borderSoft} vertical={false} />
+              <XAxis dataKey="tier" stroke={C.textFaint} fontSize={11} />
+              <YAxis stroke={C.textFaint} fontSize={11} unit="%" />
+              <Tooltip {...tooltipStyle} formatter={(v) => `${v}%`} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="blocks" name="Blocks" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                {tierData.map((d) => <Cell key={d.tier} fill={TIER_COLOR[d.tier]} />)}
+              </Bar>
+              <Bar dataKey="lines" name="Lines kept" fill={C.textFaint} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Policy vs. Baselines" meta="held-out blocks; dashed line = retention target">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={comparisonRows} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <CartesianGrid stroke={C.borderSoft} vertical={false} />
+              <XAxis dataKey="name" stroke={C.textFaint} fontSize={10.5} interval={0} />
+              <YAxis stroke={C.textFaint} fontSize={11} unit="%" domain={[0, 100]} />
+              <Tooltip {...tooltipStyle} formatter={(v) => `${v}%`} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine y={target * 100} stroke={C.success} strokeDasharray="4 4" />
+              <Bar dataKey="saved" name="Storage saved" fill={C.primary} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="retention" name="Weighted retention" fill={C.cyan} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 18 }}>
+        <Card padded={false}>
+          <div style={{ padding: "20px 22px 0" }}>
+            <CardHeader title="Learned Policy" meta={`${data.model.kind === "tune_half_refit" ? "tune-half refit of" : "scored by"} model V${data.model.version}`} />
+          </div>
+          <Table head={["Parameter", "Value"]}>
+            {[
+              ["Weight · anomaly score", policy.weights.anomaly_score.toFixed(3)],
+              ["Weight · event frequency", policy.weights.event_frequency.toFixed(3)],
+              ["Weight · block size", policy.weights.block_size.toFixed(3)],
+              ["Fixed error weight", policy.error_weight.toFixed(2)],
+              ["HOT threshold", policy.thresholds.hot.toFixed(4)],
+              ["WARM threshold", policy.thresholds.warm.toFixed(4)],
+              ["WARM summary fraction", policy.summary_fraction.toFixed(4)],
+              ["Retention target", pct(target, 0)],
+              ["GA generations", data.ga_summary?.generations_completed ?? "—"],
+            ].map(([k, v]) => (
+              <Row key={k}><Td title>{k}</Td><Td mono>{v}</Td></Row>
+            ))}
+          </Table>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Simulate a Policy"
+            right={<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {simBusy && <span style={{ fontSize: 11.5, color: C.textFaint }}>updating…</span>}
+              <PillTabs options={[{ value: "holdout", label: "Holdout" }, { value: "tune", label: "Tune" }, { value: "all", label: "All" }]}
+                active={params?.split} onChange={(split) => set({ split })} />
+              <Button size="sm" variant="ghost" onClick={() => setParams(policyParams(data.policy, data.config.warm_credit))}>Reset</Button>
+            </div>}
+          />
+          {params && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 26px" }}>
+              <div>
+                <Slider label="HOT threshold" value={params.t_hot} min={0.01} max={1} step={0.005} onChange={(v) => set({ t_hot: v })} />
+                <Slider label="WARM threshold" value={params.t_warm} min={0} max={Math.max(0, params.t_hot - 0.005)} step={0.005} onChange={(v) => set({ t_warm: v })} />
+                <Slider label="WARM summary fraction" value={params.summary_fraction} min={0.01} max={1} step={0.01} onChange={(v) => set({ summary_fraction: v })} />
+                <Slider label="WARM retention credit" value={params.warm_credit} min={0} max={1} step={0.05} onChange={(v) => set({ warm_credit: v })} format={(v) => v.toFixed(2)} />
+              </div>
+              <div>
+                <Slider label="Weight · anomaly score" value={params.weights.anomaly_score} min={0} max={1} step={0.01} onChange={(v) => setWeight("anomaly_score", v)} format={(v) => v.toFixed(2)} />
+                <Slider label="Weight · event frequency" value={params.weights.event_frequency} min={0} max={1} step={0.01} onChange={(v) => setWeight("event_frequency", v)} format={(v) => v.toFixed(2)} />
+                <Slider label="Weight · block size" value={params.weights.block_size} min={0} max={1} step={0.01} onChange={(v) => setWeight("block_size", v)} format={(v) => v.toFixed(2)} hint="Weights are rescaled to sum to 1" />
+              </div>
+            </div>
+          )}
+          {simError ? (
+            <div style={{ color: C.danger, fontSize: 12.5, marginTop: 6 }}>{simError}</div>
+          ) : o && (
+            <div style={{ borderTop: `1px solid ${C.borderSoft}`, paddingTop: 14, marginTop: 4 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+                <Stat label="Storage saved" value={`${o.storage_saved_pct.toFixed(1)}%`} color={C.primary} />
+                <Stat label="Weighted retention" value={pct(o.weighted_retention)} color={sim.meets_retention_target ? C.success : C.warning} />
+                <Stat label="Full retention" value={pct(o.full_retention)} />
+                <Stat label="Coverage" value={pct(o.coverage)} />
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+                {sim.meets_retention_target ? <Badge tone="success" dot>Meets {pct(sim.retention_target, 0)} target</Badge> : <Badge tone="warning">Below {pct(sim.retention_target, 0)} target</Badge>}
+                {TIERS.map((t) => (
+                  <Badge key={t} tone="neutral">{t} {o.tier_counts[t].toLocaleString("en-US")}</Badge>
+                ))}
+                <span style={{ fontSize: 11.5, color: C.textFaint }}>on {o.n_blocks.toLocaleString("en-US")} {sim.split} blocks</span>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live Stream (/api/stream/*)
+// ---------------------------------------------------------------------------
+
+const STREAM_POLL_MS = 2000;
+const ALERTS_POLL_MS = 4000;
+const RATE_HISTORY = 60;
+
+function LiveStreamPage() {
+  const [status, setStatus] = useState(null);
+  const [statusError, setStatusError] = useState(null);
+  const [series, setSeries] = useState([]);
+  const [alerts, setAlerts] = useState(null);
+  const [alertType, setAlertType] = useState("all");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function tick() {
+      try {
+        const s = await apiGet("/api/stream/status");
+        if (cancelled) return;
+        setStatus(s);
+        setStatusError(null);
+        const stamp = new Date().toLocaleTimeString("en-US", { hour12: false });
+        setSeries((prev) => [...prev, { t: stamp, eps: s.live ? s.events_per_sec : 0 }].slice(-RATE_HISTORY));
+      } catch (err) {
+        if (!cancelled) setStatusError(err);
+      }
+    }
+    tick();
+    const iv = setInterval(tick, STREAM_POLL_MS);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function tick() {
+      try {
+        const data = await apiGet("/api/stream/alerts", { limit: 50, type: alertType === "all" ? undefined : alertType });
+        if (!cancelled) setAlerts(data);
+      } catch {
+        // keep the last good list; the status card already reports outages
+      }
+    }
+    tick();
+    const iv = setInterval(tick, ALERTS_POLL_MS);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [alertType]);
+
+  if (!status && !statusError) return <PageLoading />;
+  if (!status && statusError) {
+    return (
+      <div>
+        <PageHeader title="Live Stream" sub="Kafka processor: early warnings, block verdicts and storage decisions as logs arrive" />
+        {statusError.status === 404 ? (
+          <Card style={{ textAlign: "center", padding: "40px 20px" }}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>No stream processor has reported yet</div>
+            <div style={{ color: C.textFaint, fontSize: 12.5 }}>{statusError.message} See docs/streaming_guide.md for the full start-up sequence.</div>
+          </Card>
+        ) : <PageError message={statusError.message} />}
+      </div>
+    );
+  }
+
+  const s = status;
+  const items = alerts?.items || [];
+
+  return (
+    <div>
+      <PageHeader
+        title="Live Stream"
+        badge={s.live ? <Badge tone="success" dot>Live</Badge> : <Badge tone="neutral">Stopped</Badge>}
+        sub={`Run ${s.run_id} — log time ${formatTimestamp(s.log_time_watermark)}, alerts at k = ${s.ks.join(", ")} events, updated ${s.seconds_since_update}s ago`}
+      />
+
+      <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
+        <KpiCard label="Events / sec" value={s.events_per_sec.toLocaleString("en-US")} icon={Zap} iconBg={C.primaryDim} iconColor={C.primary}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{s.counts.lines_received.toLocaleString("en-US")} lines received</div>} />
+        <KpiCard label="Blocks in Flight" value={s.blocks_in_flight.toLocaleString("en-US")} icon={Radio} iconBg="rgba(34,211,238,0.12)" iconColor={C.cyan}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{s.storage.blocks_decided.toLocaleString("en-US")} finalized</div>} />
+        <KpiCard label="Alerts" value={s.alerts.total.toLocaleString("en-US")} icon={AlertTriangle} iconBg={C.dangerDim} iconColor={C.danger}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{s.alerts.early_warning.toLocaleString("en-US")} early warning · {s.alerts.block_anomaly.toLocaleString("en-US")} block anomaly</div>} />
+        <KpiCard label="Storage Saved So Far" value={`${s.storage.storage_saved_pct.toFixed(1)}%`} icon={HardDrive} iconBg={C.successDim} iconColor={C.success}
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{s.storage.lines_kept.toLocaleString("en-US")} of {s.storage.lines_seen.toLocaleString("en-US")} lines kept</div>} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
+        <ChartCard title="Events per Second" meta={`last ${series.length} polls (every ${STREAM_POLL_MS / 1000}s) since this page opened`}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={series} margin={{ top: 8, right: 8, left: -6, bottom: 0 }}>
+              <defs>
+                <linearGradient id="epsFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={C.primary} stopOpacity={0.35} />
+                  <stop offset="100%" stopColor={C.primary} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={C.borderSoft} vertical={false} />
+              <XAxis dataKey="t" stroke={C.textFaint} fontSize={10.5} minTickGap={28} />
+              <YAxis stroke={C.textFaint} fontSize={11} />
+              <Tooltip {...tooltipStyle} formatter={(v) => [`${v.toLocaleString("en-US")}/s`, "events"]} />
+              <Area type="monotone" dataKey="eps" stroke={C.primary} fill="url(#epsFill)" strokeWidth={2} isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <Card>
+          <CardHeader title="Storage Decisions" meta="finalized blocks by tier" />
+          {TIERS.map((tier) => {
+            const n = s.storage.tier_counts[tier] || 0;
+            return (
+              <div key={tier} style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 6 }}>
+                  <span style={{ color: C.textMd, fontWeight: 500 }}>{tier}</span>
+                  <span style={{ fontFamily: C.mono, color: C.textFaint }}>{n.toLocaleString("en-US")}</span>
+                </div>
+                <ProgressBar pct={shareOf(n, s.storage.blocks_decided)} color={TIER_COLOR[tier]} />
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 6, lineHeight: 1.5 }}>
+            Finalized by timeout: {(s.finalize_reasons.timeout || 0).toLocaleString("en-US")} · at end of stream: {(s.finalize_reasons.end_of_stream || 0).toLocaleString("en-US")}
+          </div>
+        </Card>
+      </div>
+
+      <Card padded={false}>
+        <div style={{ padding: "20px 22px 0" }}>
+          <CardHeader
+            title="Alerts Feed"
+            right={<div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <span style={{ fontSize: 11.5, color: C.textFaint }}>{alerts ? `${alerts.total.toLocaleString("en-US")} in this run` : ""}</span>
+              <PillTabs options={[{ value: "all", label: "All" }, { value: "early_warning", label: "Early warning" }, { value: "block_anomaly", label: "Block anomaly" }]}
+                active={alertType} onChange={setAlertType} />
+            </div>}
+          />
+        </div>
+        {items.length === 0 ? (
+          <div style={{ padding: "36px 20px", textAlign: "center", color: C.textFaint, fontSize: 13 }}>No alerts in this run yet.</div>
+        ) : (
+          <Table head={["Type", "Block", "Score", "Events Seen", "Lead Time", "Log Time", "Detected"]}>
+            {items.map((a) => (
+              <Row key={a.id}>
+                <Td>{a.type === "early_warning" ? <Badge tone="warning">Early warning · k={a.k}</Badge> : <Badge tone="danger">Block anomaly</Badge>}</Td>
+                <Td mono title>{a.block_id}</Td>
+                <Td mono>{a.score.toFixed(4)}{a.threshold != null && <span style={{ color: C.textFaint }}> ≥ {a.threshold.toFixed(4)}</span>}</Td>
+                <Td mono>{a.events_total != null ? `${a.events_seen} of ${a.events_total}` : a.events_seen}</Td>
+                <Td mono>
+                  {a.type === "early_warning"
+                    ? (a.lead_fraction != null
+                      ? <span title="Share of the block's events still to come when the alert fired">{pct(a.lead_fraction)} ahead</span>
+                      : <span style={{ color: C.textFaint }}>block still running</span>)
+                    : a.early_warning_k != null
+                      ? <span style={{ color: C.textFaint }}>warned at k={a.early_warning_k}</span>
+                      : a.finalize_reason === "end_of_stream"
+                        ? <span style={{ color: C.textFaint }} title="Forced out when the topic went quiet; may be cut off mid-life">end of stream</span>
+                        : "—"}
+                </Td>
+                <Td mono>{formatTimestamp(a.event_time)}</Td>
+                <Td mono>{formatTimestamp(a.detected_at)}</Td>
+              </Row>
+            ))}
+          </Table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function SettingsPage() {
   return (
     <div>
@@ -1432,6 +1930,8 @@ export default function MorphGuardApp() {
     sources: <SourcesPage />,
     detection: <DetectionPage />,
     analytics: <AnalyticsPage />,
+    storage: <SmartStoragePage />,
+    stream: <LiveStreamPage />,
     models: <ModelsPage />,
     settings: <SettingsPage />,
   };

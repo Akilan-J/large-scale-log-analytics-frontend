@@ -43,7 +43,12 @@ async function request(path, options = {}) {
   }
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
+  if (!res.ok) {
+    // status lets a page tell "nothing here yet" (404) apart from a failure.
+    const err = new Error(data.error || `Request failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -64,10 +69,12 @@ export function apiPost(path, body) {
 
 // Multipart upload with progress. fetch() cannot report upload progress, so
 // this uses XHR; the auth header and 401 handling match request() above.
-export function apiUpload(path, file, onProgress) {
+// `fields` adds extra form fields (e.g. { source: "openstack" }).
+export function apiUpload(path, file, onProgress, fields = {}) {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("file", file);
+    Object.entries(fields).forEach(([key, value]) => form.append(key, value));
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE}${path}`);
