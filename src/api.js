@@ -85,6 +85,13 @@ export async function apiDownload(path, params, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+export function apiDelete(path, params) {
+  const query = params
+    ? "?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")).toString()
+    : "";
+  return request(`${path}${query}`, { method: "DELETE" });
+}
+
 export function apiPost(path, body) {
   return request(path, {
     method: "POST",

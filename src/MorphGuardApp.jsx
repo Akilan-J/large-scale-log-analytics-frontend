@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
-import { apiDownload, apiGet, apiPost, apiUpload } from "./api.js";
+import { apiDelete, apiDownload, apiGet, apiPost, apiUpload } from "./api.js";
 import {
   LayoutDashboard, Database, ShieldAlert, BarChart3, GitBranch, Settings,
   Search, Bell, ChevronLeft, Plus, RefreshCw, UploadCloud, Download,
@@ -1201,6 +1201,27 @@ function UploadDetectionsModal({ upload, onClose }) {
   );
 }
 
+// Confirm an alert as a real anomaly or mark it a false alarm; clicking the
+// active verdict again withdraws it.
+function VerdictButtons({ blockId, verdict, onChange }) {
+  const button = (value, label, tone, title) => {
+    const active = verdict === value;
+    return (
+      <button type="button" title={title} onClick={() => onChange(blockId, active ? null : value)} style={{
+        fontSize: 11.5, fontWeight: 600, padding: "3px 8px", borderRadius: 6, cursor: "pointer", fontFamily: C.sans,
+        border: `1px solid ${active ? C[tone] : C.border}`, background: active ? C[`${tone}Dim`] : "transparent",
+        color: active ? C[tone] : C.textFaint,
+      }}>{label}</button>
+    );
+  };
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      {button("anomaly", "Real", "danger", "Confirm: this is a real anomaly")}
+      {button("normal", "False alarm", "success", "Mark as normal (false alarm)")}
+    </div>
+  );
+}
+
 function DetectionPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -1215,6 +1236,22 @@ function DetectionPage() {
 
   const source = useSource();
   const { data: summary } = useApiData(() => apiGet("/api/detections/summary", { source }), []);
+  // D2: analysts' verdicts, fed into this source's next retrain.
+  const [verdicts, setVerdicts] = useState({});
+  useEffect(() => {
+    apiGet("/api/feedback", { source }).then((r) => setVerdicts(r.by_block || {})).catch(() => {});
+  }, [source]);
+  async function setVerdict(blockId, verdict) {
+    const previous = verdicts[blockId];
+    setVerdicts((v) => ({ ...v, [blockId]: verdict }));
+    try {
+      if (verdict) await apiPost(`/api/feedback?source=${source}`, { block_id: blockId, verdict });
+      else await apiDelete("/api/feedback", { source, block_id: blockId });
+    } catch (err) {
+      setVerdicts((v) => ({ ...v, [blockId]: previous }));
+      alert(err.message);
+    }
+  }
   const { data, loading, error, status } = useApiData(
     () => apiGet("/api/detections", { source, search: debouncedSearch, severity: sev, page, limit }),
     [debouncedSearch, sev, page]
@@ -1255,7 +1292,7 @@ function DetectionPage() {
         {error && (status === 404
           ? <div style={{ padding: "0 22px 16px" }}><PageError message={error} status={404} /></div>
           : <div style={{ padding: "0 22px 16px", color: C.danger, fontSize: 13 }}>{error}</div>)}
-        <Table head={["Timestamp", "Block ID", "Component", "Event Type", "Anomaly Score", "Severity", "Source IP"]}>
+        <Table head={["Timestamp", "Block ID", "Component", "Event Type", "Anomaly Score", "Severity", "Source IP", "Analyst verdict"]}>
           {(data?.items || []).map((e) => (
             <Row key={e.block_id}>
               <Td mono>{formatTimestamp(e.timestamp)}</Td>
@@ -1265,6 +1302,7 @@ function DetectionPage() {
               <Td mono>{e.anomaly_score.toFixed(4)}</Td>
               <Td>{e.severity === "normal" ? <Badge tone="neutral">normal</Badge> : <Badge tone={SEVERITY_TONE[e.severity]} dot>{e.severity}</Badge>}</Td>
               <Td mono>{e.source_ip}</Td>
+              <Td><VerdictButtons blockId={e.block_id} verdict={verdicts[e.block_id]} onChange={setVerdict} /></Td>
             </Row>
           ))}
           {!loading && data && data.items.length === 0 && (
@@ -1471,6 +1509,7 @@ function ModelsPage() {
         sub={`${data.source?.title || "HDFS"}: retrains via genetic-algorithm optimization and promotes a candidate only if it beats the currently deployed model`}
         right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)} disabled={isRunning}>{isRunning ? "Retrain running…" : "Run Retrain Cycle"}</Button>} />
 
+      <FeedbackNote source={source} job={job} />
       {data.evaluation && <HeldOutCard evaluation={data.evaluation} source={data.source} />}
 
       <Card style={{ padding: "28px 26px 20px", marginBottom: 18 }}>
@@ -1586,6 +1625,27 @@ function ModelsPage() {
 // Held-out numbers for the deployed model and every caveat on its labels.
 // OpenStack shows both label views side by side (B5): F1 against the by-run
 // labels, and how many of the dataset's documented faulty instances it catches.
+// D2: how many analyst verdicts the next retrain will apply, and what the
+// last one actually applied.
+function FeedbackNote({ source, job }) {
+  const [counts, setCounts] = useState(null);
+  useEffect(() => {
+    apiGet("/api/feedback", { source }).then((r) => setCounts(r.counts)).catch(() => setCounts(null));
+  }, [source, job?.state]);
+  const used = job?.feedback;
+  if (!counts && !used) return null;
+  return (
+    <Card style={{ marginBottom: 18, padding: "14px 20px" }}>
+      <div style={{ fontSize: 12.5, color: C.textMd }}>
+        <strong style={{ color: C.textHi }}>Analyst feedback:</strong>{" "}
+        {counts ? `${counts.anomaly} confirmed anomal${counts.anomaly === 1 ? "y" : "ies"}, ${counts.normal} false alarm${counts.normal === 1 ? "" : "s"}` : "unavailable"}
+        {" "}— mark alerts on Detection Results; the next retrain trains and evaluates on the corrected labels and re-scores the live model on them too.
+        {used && used.applied > 0 && ` Last retrain applied ${used.applied} verdict${used.applied === 1 ? "" : "s"} (${used.changed} changed a label).`}
+      </div>
+    </Card>
+  );
+}
+
 function HeldOutCard({ evaluation: ev, source }) {
   const f = (v) => (v == null ? "—" : v.toFixed(4));
   const stability = ev.stability?.versions;
@@ -1605,6 +1665,25 @@ function HeldOutCard({ evaluation: ev, source }) {
       {ev.deployed_caught && <div style={{ fontSize: 12.5, color: C.textMd, marginTop: 12 }}>Deployed model {ev.deployed_caught} held-out anomalies{ev.v1_caught ? ` (V1 ${ev.v1_caught.replace("caught ", "")})` : ""}.</div>}
       {gt?.note && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>{gt.note}</div>}
       {ev.label_description && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>Labels: {ev.label_description}</div>}
+      {ev.model_comparison && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textHi, marginBottom: 4 }}>Why Isolation Forest — compared with an Autoencoder</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 8 }}>
+            Same held-out splits (seeds {ev.model_comparison.seeds.join(", ")}), same alert rate as the deployed model.
+          </div>
+          <Table head={["Detector", "Test F1", "ROC AUC", "F1 at best threshold", "Fit time"]}>
+            {ev.model_comparison.rows.map((r) => (
+              <Row key={r.detector}>
+                <Td title>{r.detector}</Td>
+                <Td mono>{r.f1_at_deployed_alert_rate.toFixed(3)} ± {r.f1_std.toFixed(3)}</Td>
+                <Td mono>{r.roc_auc_test.toFixed(3)}</Td>
+                <Td mono>{r.f1_at_train_best_f1_threshold.toFixed(3)}</Td>
+                <Td mono>{r.fit_seconds.toFixed(1)} s</Td>
+              </Row>
+            ))}
+          </Table>
+        </div>
+      )}
       {(ev.warnings || []).map((w) => (
         <div key={w} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: C.warning, marginTop: 8 }}>
           <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /> <span>{w}</span>
