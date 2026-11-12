@@ -59,6 +59,32 @@ export function apiGet(path, params) {
   return request(`${path}${query}`);
 }
 
+// Authenticated file download (e.g. a CSV export): fetches with the bearer
+// token, then saves the response through a temporary object URL.
+export async function apiDownload(path, params, filename) {
+  const query = params
+    ? "?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== "")).toString()
+    : "";
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}${query}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Download failed: ${res.status}`);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function apiPost(path, body) {
   return request(path, {
     method: "POST",

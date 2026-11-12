@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { apiGet, apiPost, apiUpload } from "./api.js";
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
+import { apiDownload, apiGet, apiPost, apiUpload } from "./api.js";
 import {
   LayoutDashboard, Database, ShieldAlert, BarChart3, GitBranch, Settings,
   Search, Bell, ChevronLeft, Plus, RefreshCw, UploadCloud, Download,
@@ -122,8 +122,32 @@ function bold(text) {
   );
 }
 
+// Which log source every source-aware page shows. Remembered per browser.
+export const SOURCES = [
+  { value: "hdfs", label: "HDFS" },
+  { value: "openstack", label: "OpenStack" },
+  { value: "apache", label: "Apache" },
+  { value: "cloudtrail", label: "CloudTrail" },
+  { value: "django", label: "Django" },
+];
+const SOURCE_KEY = "mg_source";
+// Pages that read ?source=; the others (uploads, settings) ignore it.
+const SOURCE_PAGES = new Set(["dashboard", "detection", "analytics", "storage", "stream", "models"]);
+const SourceCtx = createContext({ source: "hdfs", setSource: () => {} });
+function useSource() { return useContext(SourceCtx).source; }
+function sourceLabel(value) { return SOURCES.find((s) => s.value === value)?.label || value; }
+
+function readStoredSource() {
+  try {
+    const stored = localStorage.getItem(SOURCE_KEY);
+    return SOURCES.some((s) => s.value === stored) ? stored : "hdfs";
+  } catch {
+    return "hdfs";
+  }
+}
+
 function useApiData(fetcher, deps) {
-  const [state, setState] = useState({ data: null, loading: true, error: null });
+  const [state, setState] = useState({ data: null, loading: true, error: null, status: null });
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
@@ -131,8 +155,8 @@ function useApiData(fetcher, deps) {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
     fetcherRef.current()
-      .then((data) => { if (!cancelled) setState({ data, loading: false, error: null }); })
-      .catch((err) => { if (!cancelled) setState({ data: null, loading: false, error: err.message || "Failed to load." }); });
+      .then((data) => { if (!cancelled) setState({ data, loading: false, error: null, status: 200 }); })
+      .catch((err) => { if (!cancelled) setState({ data: null, loading: false, error: err.message || "Failed to load.", status: err.status ?? null }); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
@@ -140,11 +164,29 @@ function useApiData(fetcher, deps) {
   return state;
 }
 
+// Says what kind of labels a non-HDFS source has, next to its metrics, so a
+// rule-based or synthetic F1 is never read as ground truth.
+function SourceBadge({ info }) {
+  if (!info || info.name === "hdfs") return null;
+  const tone = info.label_kind === "ground truth" ? "success" : "warning";
+  return <Badge tone={tone}>{info.title} · {info.label_kind} labels</Badge>;
+}
+
 function PageLoading() {
   return <div style={{ padding: "60px 0", textAlign: "center", color: C.textFaint, fontSize: 13 }}>Loading…</div>;
 }
 
-function PageError({ message }) {
+function PageError({ message, status }) {
+  // 404 from a ?source= endpoint means that source's data isn't on this
+  // server, which is a setup step, not a failure.
+  if (status === 404) {
+    return (
+      <Card style={{ textAlign: "center", padding: "32px 20px" }}>
+        <div style={{ color: C.warning, fontWeight: 600, marginBottom: 6 }}>Not available on this server yet</div>
+        <div style={{ color: C.textMd, fontSize: 12.5, maxWidth: 640, margin: "0 auto", lineHeight: 1.6 }}>{message}</div>
+      </Card>
+    );
+  }
   return (
     <Card style={{ textAlign: "center", padding: "32px 20px" }}>
       <div style={{ color: C.danger, fontWeight: 600, marginBottom: 4 }}>Couldn't load this page</div>
@@ -445,7 +487,27 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
   );
 }
 
-function Topbar({ pageTitle }) {
+function SourcePicker() {
+  const { source, setSource } = useContext(SourceCtx);
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.textFaint }}>
+      Log source
+      <select
+        value={source}
+        onChange={(e) => setSource(e.target.value)}
+        aria-label="Log source"
+        style={{
+          background: C.card, color: C.textHi, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: "7px 10px", fontSize: 13, fontFamily: C.sans, cursor: "pointer",
+        }}
+      >
+        {SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function Topbar({ pageTitle, showSource }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const initials = initialsOf(currentUser());
 
@@ -463,7 +525,7 @@ function Topbar({ pageTitle }) {
     }}>
       <div style={{ fontSize: 15, fontWeight: 600, color: C.textHi }}>{pageTitle}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <SearchBox value="" onChange={() => {}} placeholder="Search logs, events, models..." width={260} />
+        {showSource && <SourcePicker />}
         <div style={{
           display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.success,
           background: C.successDim, border: "1px solid rgba(16,185,129,0.25)", padding: "6px 12px", borderRadius: 20,
@@ -504,6 +566,38 @@ function Topbar({ pageTitle }) {
   );
 }
 
+function blockNoun(info, plural = false) {
+  const noun = info?.block_noun || "block";
+  const word = plural ? (noun.endsWith("s") ? noun : `${noun}s`) : noun;
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+// E1: the deployed model's real state from /api/dashboard (healthy, degraded,
+// unverified or unavailable), not a fixed "Healthy" badge.
+const STATUS_ICON = { success: CheckCircle2, warning: AlertTriangle, danger: AlertTriangle };
+const STATUS_BG = { success: C.successDim, warning: C.warningDim, danger: C.dangerDim };
+function ModelStatusCard({ status, fpRate }) {
+  const tone = status?.tone || "warning";
+  const Icon = STATUS_ICON[tone] || AlertTriangle;
+  const state = status?.state || "unknown";
+  return (
+    <Card hoverable>
+      <div style={{ width: 36, height: 36, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, background: STATUS_BG[tone] || C.warningDim, color: C[tone] || C.warning }}>
+        <Icon size={18} />
+      </div>
+      <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Model Status</div>
+      <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+        {state === "unavailable" ? "Offline" : "Active"}
+        <Badge tone={tone} dot={tone === "success"}>{state.charAt(0).toUpperCase() + state.slice(1)}</Badge>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }} title={status?.detail}>
+        {status?.detail || "No status reported."}
+        {fpRate != null && ` · ${fpRate.toFixed(2)}% false positives`}
+      </div>
+    </Card>
+  );
+}
+
 function DashboardPage({ onNavigate }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [job, setJob] = useState(null);
@@ -513,8 +607,9 @@ function DashboardPage({ onNavigate }) {
   // to the full deployed dataset.
   const [scope, setScope] = useState("auto");
 
-  const { data, loading, error } = useApiData(
-    () => apiGet("/api/dashboard", scope === "dataset" ? { scope: "dataset" } : {}),
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(
+    () => apiGet("/api/dashboard", { source, ...(scope === "dataset" ? { scope: "dataset" } : {}) }),
     [refreshKey, scope]
   );
 
@@ -552,7 +647,7 @@ function DashboardPage({ onNavigate }) {
   async function startScan() {
     setConfirmOpen(false);
     try {
-      const { job_id } = await apiPost("/api/models/retrain");
+      const { job_id } = await apiPost(`/api/models/retrain?source=${source}`);
       setJob({ state: "running", started_at: new Date().toISOString(), job_id, result: null, error: null });
     } catch (err) {
       setToast({ title: "Couldn't start detection scan", sub: err.message });
@@ -561,7 +656,7 @@ function DashboardPage({ onNavigate }) {
   }
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range, view } = data;
   const onUpload = view?.mode === "upload";
@@ -570,12 +665,13 @@ function DashboardPage({ onNavigate }) {
     <div>
       <PageHeader
         title="Overview"
-        badge={onUpload
-          ? <Badge tone="warning">Uploaded File</Badge>
-          : <Badge tone="primary">Full Dataset</Badge>}
+        badge={<>
+          {onUpload ? <Badge tone="warning">Uploaded File</Badge> : <Badge tone="primary">Full Dataset</Badge>}
+          <SourceBadge info={data.source} />
+        </>}
         sub={onUpload
           ? `Detection results for ${view.upload.name} — ${kpis.total_blocks_analyzed.toLocaleString("en-US")} blocks from ${kpis.total_logs_processed.toLocaleString("en-US")} log lines (${formatDateRange(date_range)})`
-          : `Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
+          : `Isolation Forest anomaly detection over the ${data.source?.title || "HDFS"} logs, one row per ${data.source?.block_noun || "block"} (${formatDateRange(date_range)})`}
         right={<>
           {onUpload
             ? <Button size="sm" onClick={() => setScope("dataset")}>View Full Dataset</Button>
@@ -598,20 +694,11 @@ function DashboardPage({ onNavigate }) {
           <div style={{ fontFamily: C.mono, fontSize: 28, fontWeight: 600, letterSpacing: "-.5px" }}>V{kpis.current_version}</div>
           <LineageMini />
         </Card>
-        <Card hoverable>
-          <div style={{ width: 36, height: 36, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, background: C.successDim, color: C.success }}>
-            <CheckCircle2 size={18} />
-          </div>
-          <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Model Status</div>
-          <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Active <Badge tone="success" dot>Healthy</Badge></div>
-          <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>
-            {kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}% false positive rate` : "Serving all traffic"}
-          </div>
-        </Card>
+        <ModelStatusCard status={kpis.model_status} fpRate={kpis.false_positive_rate_pct} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
-        <ChartCard title="Log Volume & Anomalies — by Day" meta={formatDateRange(date_range)}>
+        <ChartCard title={`${blockNoun(data.source, true)} & Anomalies — by Day`} meta={`${formatDateRange(date_range)} · anomalies on the right axis`}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={volume_by_day} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
@@ -620,8 +707,10 @@ function DashboardPage({ onNavigate }) {
               <YAxis yAxisId="right" orientation="right" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <Tooltip {...tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 11, fontFamily: C.sans }} />
-              <Bar yAxisId="left" dataKey="logs" name="Log events" fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
-              <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalies" stroke={C.danger} strokeWidth={2} dot={{ r: 4, fill: C.danger }} activeDot={{ r: 6 }} />
+              {/* Blocks and anomalous blocks share a unit; raw log lines (a different one) stay in the tooltip. */}
+              <Bar yAxisId="left" dataKey="blocks" name={blockNoun(data.source, true)} fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
+              <Line yAxisId="left" dataKey="logs" name="Log lines" stroke="transparent" dot={false} activeDot={false} legendType="none" />
+              <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalous" stroke={C.danger} strokeWidth={2} dot={{ r: 4, fill: C.danger }} activeDot={{ r: 6 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -716,7 +805,8 @@ function formatDuration(seconds) {
 // Held-out early-warning results per prefix length k (/api/early-warning/summary).
 // Fetched on its own so a missing report only empties this card, not the dashboard.
 function EarlyWarningCard() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/early-warning/summary"), []);
+  const source = useSource();
+  const { data, loading, error } = useApiData(() => apiGet("/api/early-warning/summary", { source }), []);
   const bestK = data?.trade_off_in_progress?.best_k ?? data?.trade_off?.best_k;
   return (
     <Card padded={false} style={{ marginTop: 18 }}>
@@ -1104,9 +1194,10 @@ function DetectionPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: summary } = useApiData(() => apiGet("/api/detections/summary"), []);
-  const { data, loading, error } = useApiData(
-    () => apiGet("/api/detections", { search: debouncedSearch, severity: sev, page, limit }),
+  const source = useSource();
+  const { data: summary } = useApiData(() => apiGet("/api/detections/summary", { source }), []);
+  const { data, loading, error, status } = useApiData(
+    () => apiGet("/api/detections", { source, search: debouncedSearch, severity: sev, page, limit }),
     [debouncedSearch, sev, page]
   );
 
@@ -1115,9 +1206,11 @@ function DetectionPage() {
   return (
     <div>
       <PageHeader title="Detection Results"
-        badge={<Badge tone="primary">All Ingested Data</Badge>}
-        sub="Block-level anomaly classification from the currently deployed Isolation Forest model — the base dataset plus every block ingested through Log Sources"
-        right={<Button size="sm" icon={Download}>Export CSV</Button>} />
+        badge={<><Badge tone="primary">{source === "hdfs" ? "All Ingested Data" : sourceLabel(source)}</Badge><SourceBadge info={summary?.source} /></>}
+        sub={source === "hdfs"
+          ? "Block-level anomaly classification from the currently deployed Isolation Forest model — the base dataset plus every block ingested through Log Sources"
+          : `Anomaly classification per ${summary?.source?.block_noun || "block"} from ${sourceLabel(source)}'s deployed Isolation Forest model`}
+        right={<Button size="sm" icon={Download} onClick={() => apiDownload("/api/detections/export", { source, severity: sev, search: debouncedSearch }, `${source}_detections.csv`).catch((e) => alert(e.message))}>Export CSV</Button>} />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
         <KpiCard label="Total Blocks Analyzed" value={summary ? summary.total_analyzed.toLocaleString("en-US") : "—"} />
@@ -1140,7 +1233,9 @@ function DetectionPage() {
             />
           </div>
         </div>
-        {error && <div style={{ padding: "0 22px 16px", color: C.danger, fontSize: 13 }}>{error}</div>}
+        {error && (status === 404
+          ? <div style={{ padding: "0 22px 16px" }}><PageError message={error} status={404} /></div>
+          : <div style={{ padding: "0 22px 16px", color: C.danger, fontSize: 13 }}>{error}</div>)}
         <Table head={["Timestamp", "Block ID", "Component", "Event Type", "Anomaly Score", "Severity", "Source IP"]}>
           {(data?.items || []).map((e) => (
             <Row key={e.block_id}>
@@ -1176,10 +1271,11 @@ function DetectionPage() {
 }
 
 function AnalyticsPage() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/analytics"), []);
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(() => apiGet("/api/analytics", { source }), []);
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const {
     component_distribution, event_type_distribution, log_level_distribution,
@@ -1189,7 +1285,8 @@ function AnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="Analytics" sub={`Real distributions from the HDFS log trace (${formatDateRange(date_range)})`} />
+      <PageHeader title="Analytics" badge={<SourceBadge info={data.source} />}
+        sub={`Real distributions from the ${data.source?.title || "HDFS"} logs (${formatDateRange(date_range)})`} />
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
         <ChartCard title="Anomalies Detected — by Day" meta={formatDateRange(date_range)}>
@@ -1295,7 +1392,8 @@ function ModelsPage() {
   const [job, setJob] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const { data, loading, error } = useApiData(() => apiGet("/api/models"), [refreshKey]);
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(() => apiGet("/api/models", { source }), [refreshKey]);
 
   useEffect(() => {
     if (data?.job && !job) setJob(data.job);
@@ -1329,7 +1427,7 @@ function ModelsPage() {
   async function startRetrain() {
     setModalOpen(false);
     try {
-      const { job_id } = await apiPost("/api/models/retrain");
+      const { job_id } = await apiPost(`/api/models/retrain?source=${source}`);
       setJob({ state: "running", started_at: new Date().toISOString(), job_id, result: null, error: null });
     } catch (err) {
       setToast({ title: "Couldn't start retrain", sub: err.message });
@@ -1338,7 +1436,7 @@ function ModelsPage() {
   }
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const { current, history_table, timeline } = data;
   const isRunning = job?.state === "running";
@@ -1350,8 +1448,11 @@ function ModelsPage() {
 
   return (
     <div>
-      <PageHeader title="Model Management" sub="Retrains via genetic-algorithm optimization and promotes a candidate only if it beats the currently deployed model"
+      <PageHeader title="Model Management" badge={<SourceBadge info={data.source} />}
+        sub={`${data.source?.title || "HDFS"}: retrains via genetic-algorithm optimization and promotes a candidate only if it beats the currently deployed model`}
         right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)} disabled={isRunning}>{isRunning ? "Retrain running…" : "Run Retrain Cycle"}</Button>} />
+
+      {data.evaluation && <HeldOutCard evaluation={data.evaluation} source={data.source} />}
 
       <Card style={{ padding: "28px 26px 20px", marginBottom: 18 }}>
         <CardHeader title="Model Evolution Lineage" right={<Badge tone="primary">{history_table.length} version{history_table.length === 1 ? "" : "s"}</Badge>} />
@@ -1463,6 +1564,37 @@ function ModelsPage() {
   );
 }
 
+// Held-out numbers for the deployed model and every caveat on its labels.
+// OpenStack shows both label views side by side (B5): F1 against the by-run
+// labels, and how many of the dataset's documented faulty instances it catches.
+function HeldOutCard({ evaluation: ev, source }) {
+  const f = (v) => (v == null ? "—" : v.toFixed(4));
+  const stability = ev.stability?.versions;
+  const gt = ev.ground_truth_check;
+  return (
+    <Card style={{ marginBottom: 18 }}>
+      <CardHeader title="Held-out Evaluation" meta={ev.protocol || ""}
+        right={source?.name !== "hdfs" && <Badge tone="warning">{ev.label_kind || source?.label_kind} labels</Badge>} />
+      <div style={{ display: "grid", gridTemplateColumns: gt ? "repeat(4,1fr)" : "repeat(3,1fr)", gap: 18, marginTop: 6 }}>
+        <MetricBlock label="Deployed model · test F1" value={f(ev.deployed_test_f1)} color={C.success} />
+        {ev.v1_test_f1 != null
+          ? <MetricBlock label="V1 baseline · test F1" value={f(ev.v1_test_f1)} />
+          : stability && <MetricBlock label="Test F1 over 5 splits" value={`${stability.V2?.test_f1_mean?.toFixed(3) ?? "—"} ± ${stability.V2?.test_f1_std?.toFixed(3) ?? "—"}`} />}
+        <MetricBlock label="Test set" value={ev.test_blocks != null ? `${ev.test_blocks.toLocaleString("en-US")} (${(ev.test_anomalies ?? 0).toLocaleString("en-US")} anomalous)` : "—"} small />
+        {gt && <MetricBlock label="Documented faulty instances" value={gt.caught} color={C.warning} small />}
+      </div>
+      {ev.deployed_caught && <div style={{ fontSize: 12.5, color: C.textMd, marginTop: 12 }}>Deployed model {ev.deployed_caught} held-out anomalies{ev.v1_caught ? ` (V1 ${ev.v1_caught.replace("caught ", "")})` : ""}.</div>}
+      {gt?.note && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>{gt.note}</div>}
+      {ev.label_description && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>Labels: {ev.label_description}</div>}
+      {(ev.warnings || []).map((w) => (
+        <div key={w} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: C.warning, marginTop: 8 }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /> <span>{w}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function GenNode({ tone, label, version, acc, status }) {
   const dotStyles = {
     retired: { border: "#2A3644", bg: C.bgRaised },
@@ -1547,7 +1679,8 @@ function policyParams(policy, config) {
 }
 
 function SmartStoragePage() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/storage/summary"), []);
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(() => apiGet("/api/storage/summary", { source }), []);
   const [params, setParams] = useState(null);
   const [sim, setSim] = useState(null);
   const [simError, setSimError] = useState(null);
@@ -1564,7 +1697,7 @@ function SmartStoragePage() {
     setSimBusy(true);
     const timer = setTimeout(async () => {
       try {
-        const result = await apiPost("/api/storage/simulate", params);
+        const result = await apiPost(`/api/storage/simulate?source=${source}`, params);
         if (!cancelled) { setSim(result); setSimError(null); }
       } catch (err) {
         if (!cancelled) setSimError(err.message);
@@ -1590,7 +1723,7 @@ function SmartStoragePage() {
   })), [data]);
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const h = data.holdout;
   const target = data.config.retention_target;
@@ -1609,7 +1742,7 @@ function SmartStoragePage() {
     <div>
       <PageHeader
         title="Smart Storage"
-        badge={data.stale ? <Badge tone="warning">Stale — re-run the optimizer</Badge> : <Badge tone="primary">Held-out Blocks</Badge>}
+        badge={<>{data.stale ? <Badge tone="warning">Stale — re-run the optimizer</Badge> : <Badge tone="primary">Held-out Blocks</Badge>}<SourceBadge info={data.source} /></>}
         sub={`GA-tuned retention policy, tuned on ${data.split.tune.blocks.toLocaleString("en-US")} blocks and measured on ${data.split.holdout.blocks.toLocaleString("en-US")} held-out ones`}
       />
 
@@ -1944,6 +2077,11 @@ export default function MorphGuardApp() {
   useSystemTheme();
   const [page, setPage] = useState("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [source, setSourceState] = useState(readStoredSource);
+  const setSource = (value) => {
+    setSourceState(value);
+    try { localStorage.setItem(SOURCE_KEY, value); } catch {}
+  };
 
   const pages = {
     dashboard: <DashboardPage onNavigate={setPage} />,
@@ -1957,6 +2095,7 @@ export default function MorphGuardApp() {
   };
 
   return (
+    <SourceCtx.Provider value={{ source, setSource }}>
     <div style={{
       display: "flex", minHeight: "100vh", background: C.bg, color: C.textHi, fontFamily: C.sans, fontSize: 14,
     }}>
@@ -1975,11 +2114,13 @@ export default function MorphGuardApp() {
       <Sidebar active={page} setActive={setPage} expanded={sidebarExpanded} setExpanded={setSidebarExpanded} />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <Topbar pageTitle={titles[page]} />
+        <Topbar pageTitle={titles[page]} showSource={SOURCE_PAGES.has(page)} />
         <main style={{ padding: 28, flex: 1 }}>
-          {pages[page]}
+          {/* key: switching source remounts the page, so no state from the previous source leaks across */}
+          <React.Fragment key={SOURCE_PAGES.has(page) ? `${page}:${source}` : page}>{pages[page]}</React.Fragment>
         </main>
       </div>
     </div>
+    </SourceCtx.Provider>
   );
 }
