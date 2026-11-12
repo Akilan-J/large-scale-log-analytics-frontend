@@ -61,7 +61,7 @@ export function useSystemTheme() {
   }, []);
 }
 
-const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning };
+const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning, rollback: C.warning, refit: C.primary };
 
 // Maps the connector icon names the backend returns onto lucide components.
 const CONNECTOR_ICONS = {
@@ -1276,7 +1276,7 @@ function AnalyticsPage() {
   );
 }
 
-const TIMELINE_COLOR = { success: C.success, danger: C.danger, warning: C.warning };
+const TIMELINE_COLOR = { success: C.success, danger: C.danger, warning: C.warning, primary: C.primary };
 
 function useElapsedSeconds(startedAt, running) {
   const [now, setNow] = useState(Date.now());
@@ -1342,8 +1342,11 @@ function ModelsPage() {
 
   const { current, history_table, timeline } = data;
   const isRunning = job?.state === "running";
-  const previous = history_table.length > 1 ? history_table[history_table.length - 2] : null;
-  const lastOutcome = timeline[0];
+  // The version before the live one; rows after it (rolled-back versions) are not "previous".
+  const activeIndex = history_table.findIndex((r) => r.status === "active");
+  const previous = activeIndex > 0 ? history_table[activeIndex - 1] : null;
+  // The newest promote/reject decision; refits (primary) and manual rollbacks (warning) are not retrain outcomes.
+  const lastOutcome = timeline.find((t) => t.tone === "success" || t.tone === "danger");
 
   return (
     <div>
@@ -1409,7 +1412,9 @@ function ModelsPage() {
                 <Td mono>{d.accuracy_pct.toFixed(1)}%</Td>
                 <Td mono>{d.f1?.toFixed(4) ?? "—"}</Td>
                 <Td mono>{formatTimestamp(d.promoted_at)}</Td>
-                <Td>{d.status === "active" ? <Badge tone="success" dot>Active</Badge> : <Badge tone="neutral">Retired</Badge>}</Td>
+                <Td>{d.status === "active" ? <Badge tone="success" dot>Active</Badge>
+                  : d.status === "rolled_back" ? <Badge tone="warning">Rolled back</Badge>
+                  : <Badge tone="neutral">Retired</Badge>}</Td>
               </Row>
             ))}
           </Table>
@@ -1528,12 +1533,14 @@ function Slider({ label, value, min, max, step, onChange, format = (v) => v.toFi
   );
 }
 
-function policyParams(policy, warmCredit) {
+function policyParams(policy, config) {
   return {
     t_hot: policy.thresholds.hot,
     t_warm: policy.thresholds.warm,
     summary_fraction: policy.summary_fraction,
-    warm_credit: warmCredit,
+    warm_credit: config.warm_credit,
+    // Reports written before proportional WARM credit have no reference share.
+    ...(config.warm_ref_fraction != null && { warm_ref_fraction: config.warm_ref_fraction }),
     weights: { ...policy.weights },
     split: "holdout",
   };
@@ -1547,7 +1554,7 @@ function SmartStoragePage() {
   const [simBusy, setSimBusy] = useState(false);
 
   useEffect(() => {
-    if (data && !params) setParams(policyParams(data.policy, data.config.warm_credit));
+    if (data && !params) setParams(policyParams(data.policy, data.config));
   }, [data, params]);
 
   // Debounced so dragging a slider sends one request when it settles, not one per pixel.
@@ -1615,7 +1622,11 @@ function SmartStoragePage() {
         <KpiCard label="Full Retention (HOT only)" value={pct(h.full_retention)} icon={CheckCircle2} iconBg={C.successDim} iconColor={C.success}
           footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>{h.tier_anomalies.HOT.toLocaleString("en-US")} of {h.n_anomalies.toLocaleString("en-US")} anomalies kept in full</div>} />
         <KpiCard label="Coverage (HOT + WARM)" value={pct(h.coverage)} icon={Activity} iconBg="rgba(34,211,238,0.12)" iconColor={C.cyan}
-          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>WARM credit {data.config.warm_credit}</div>} />
+          footer={<div style={{ fontSize: 12, color: C.textFaint, marginTop: 10 }}>
+            {data.config.warm_ref_fraction != null
+              ? `WARM credit up to ${data.config.warm_credit}, full at ${pct(data.config.warm_ref_fraction, 0)} of a block kept`
+              : `WARM credit ${data.config.warm_credit} (flat)`}
+          </div>} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 18, marginBottom: 18 }}>
@@ -1665,6 +1676,12 @@ function SmartStoragePage() {
               ["HOT threshold", policy.thresholds.hot.toFixed(4)],
               ["WARM threshold", policy.thresholds.warm.toFixed(4)],
               ["WARM summary fraction", policy.summary_fraction.toFixed(4)],
+              ["WARM lines kept / block", data.warm_tier?.mean_lines_per_warm_block != null
+                ? `${data.warm_tier.mean_lines_per_warm_block.toFixed(1)} of ${data.warm_tier.mean_event_frequency_of_warm_blocks.toFixed(1)}`
+                : "—"],
+              ["WARM credit earned / anomaly", data.warm_tier?.mean_credit_per_warm_anomaly != null
+                ? data.warm_tier.mean_credit_per_warm_anomaly.toFixed(3)
+                : "—"],
               ["Retention target", pct(target, 0)],
               ["GA generations", data.ga_summary?.generations_completed ?? "—"],
             ].map(([k, v]) => (
@@ -1680,7 +1697,7 @@ function SmartStoragePage() {
               {simBusy && <span style={{ fontSize: 11.5, color: C.textFaint }}>updating…</span>}
               <PillTabs options={[{ value: "holdout", label: "Holdout" }, { value: "tune", label: "Tune" }, { value: "all", label: "All" }]}
                 active={params?.split} onChange={(split) => set({ split })} />
-              <Button size="sm" variant="ghost" onClick={() => setParams(policyParams(data.policy, data.config.warm_credit))}>Reset</Button>
+              <Button size="sm" variant="ghost" onClick={() => setParams(policyParams(data.policy, data.config))}>Reset</Button>
             </div>}
           />
           {params && (
@@ -1689,7 +1706,10 @@ function SmartStoragePage() {
                 <Slider label="HOT threshold" value={params.t_hot} min={0.01} max={1} step={0.005} onChange={(v) => set({ t_hot: v })} />
                 <Slider label="WARM threshold" value={params.t_warm} min={0} max={Math.max(0, params.t_hot - 0.005)} step={0.005} onChange={(v) => set({ t_warm: v })} />
                 <Slider label="WARM summary fraction" value={params.summary_fraction} min={0.01} max={1} step={0.01} onChange={(v) => set({ summary_fraction: v })} />
-                <Slider label="WARM retention credit" value={params.warm_credit} min={0} max={1} step={0.05} onChange={(v) => set({ warm_credit: v })} format={(v) => v.toFixed(2)} />
+                <Slider label="WARM retention credit (max)" value={params.warm_credit} min={0} max={1} step={0.05} onChange={(v) => set({ warm_credit: v })} format={(v) => v.toFixed(2)} />
+                {params.warm_ref_fraction != null && (
+                  <Slider label="Full credit at share kept" value={params.warm_ref_fraction} min={0.05} max={1} step={0.05} onChange={(v) => set({ warm_ref_fraction: v })} format={(v) => `${Math.round(v * 100)}%`} hint="Thinner summaries earn proportionally less" />
+                )}
               </div>
               <div>
                 <Slider label="Weight · anomaly score" value={params.weights.anomaly_score} min={0} max={1} step={0.01} onChange={(v) => setWeight("anomaly_score", v)} format={(v) => v.toFixed(2)} />
