@@ -19,6 +19,9 @@ const DARK_THEME = {
   warning: "#F59E0B", warningDim: "#4A3608",
   danger: "#EF4444", dangerDim: "#4A1414",
   textHi: "#E6EDF3", textMd: "#B4C0CC", textLo: "#8A97A6", textFaint: "#5A6672",
+  // Text on the *Dim tints (badges) and the active nav item.
+  successText: "#4ADE9A", warningText: "#FBBF54", dangerText: "#FB7676", primaryText: "#8FBBFF",
+  navActive: "#BFD7FF", borderHover: "#2A3644",
 };
 
 const LIGHT_THEME = {
@@ -26,9 +29,11 @@ const LIGHT_THEME = {
   border: "#DDE3EA", borderSoft: "#E7ECF1",
   primary: "#2563EB", primaryDim: "#DCE7FC", cyan: "#0891B2",
   success: "#059669", successDim: "#D1FAE5",
-  warning: "#D97706", warningDim: "#FEF3C7",
+  warning: "#B45309", warningDim: "#FEF3C7",
   danger: "#DC2626", dangerDim: "#FEE2E2",
-  textHi: "#0F172A", textMd: "#3F4C5C", textLo: "#64748B", textFaint: "#94A3B8",
+  textHi: "#0F172A", textMd: "#3F4C5C", textLo: "#64748B", textFaint: "#6B7A8F",
+  successText: "#047857", warningText: "#B45309", dangerText: "#B91C1C", primaryText: "#1D4ED8",
+  navActive: "#1D4ED8", borderHover: "#C5CED9",
 };
 
 export const C = {
@@ -252,10 +257,10 @@ export function Logo({ size = 30, radius = 8 }) {
 
 function Badge({ children, tone = "neutral", dot = false }) {
   const tones = {
-    success: { bg: C.successDim, fg: "#4ADE9A", bd: "rgba(16,185,129,.3)" },
-    warning: { bg: C.warningDim, fg: "#FBBF54", bd: "rgba(245,158,11,.3)" },
-    danger: { bg: C.dangerDim, fg: "#FB7676", bd: "rgba(239,68,68,.3)" },
-    primary: { bg: C.primaryDim, fg: "#8FBBFF", bd: "rgba(59,130,246,.35)" },
+    success: { bg: C.successDim, fg: C.successText, bd: "rgba(16,185,129,.3)" },
+    warning: { bg: C.warningDim, fg: C.warningText, bd: "rgba(245,158,11,.3)" },
+    danger: { bg: C.dangerDim, fg: C.dangerText, bd: "rgba(239,68,68,.3)" },
+    primary: { bg: C.primaryDim, fg: C.primaryText, bd: "rgba(59,130,246,.35)" },
     neutral: { bg: C.bgRaised, fg: C.textMd, bd: C.border },
   }[tone];
   return (
@@ -277,7 +282,7 @@ function Card({ children, style, hoverable = false, padded = true }) {
       onMouseEnter={() => hoverable && setHover(true)}
       onMouseLeave={() => hoverable && setHover(false)}
       style={{
-        background: C.card, border: `1px solid ${hover ? "#2A3644" : C.border}`, borderRadius: 12,
+        background: C.card, border: `1px solid ${hover ? C.borderHover : C.border}`, borderRadius: 12,
         boxShadow: hover ? "0 4px 16px rgba(0,0,0,.35)" : "0 1px 2px rgba(0,0,0,.4)",
         transform: hover ? "translateY(-2px)" : "none", transition: "all .15s",
         padding: padded ? "20px 22px" : 0, ...style,
@@ -471,7 +476,7 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
               return (
                 <div key={key} onClick={() => setActive(key)} style={{
                   display: "flex", alignItems: "center", gap: 14, padding: "10px 12px", borderRadius: 8,
-                  color: isActive ? "#BFD7FF" : C.textLo, fontWeight: 500, fontSize: 13.5, whiteSpace: "nowrap",
+                  color: isActive ? C.navActive : C.textLo, fontWeight: 500, fontSize: 13.5, whiteSpace: "nowrap",
                   overflow: "hidden", marginBottom: 2, position: "relative", cursor: "pointer",
                   background: isActive ? C.primaryDim : "transparent", transition: "background .12s, color .12s",
                 }}>
@@ -1695,7 +1700,7 @@ function HeldOutCard({ evaluation: ev, source }) {
 
 function GenNode({ tone, label, version, acc, status }) {
   const dotStyles = {
-    retired: { border: "#2A3644", bg: C.bgRaised },
+    retired: { border: C.borderHover, bg: C.bgRaised },
     deployed: { border: C.cyan, bg: C.cyan, glow: true },
     candidate: { border: C.warning, bg: C.bg, dashed: true },
   }[tone];
@@ -1898,7 +1903,7 @@ function SmartStoragePage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 18 }}>
         <Card padded={false}>
           <div style={{ padding: "20px 22px 0" }}>
-            <CardHeader title="Learned Policy" meta={`${data.model.kind === "tune_half_refit" ? "tune-half refit of" : "scored by"} model V${data.model.version}`} />
+            <CardHeader title="Learned Policy" meta={`${data.model.kind === "tune_half_refit" ? "tune-half refit of" : "scored by"} ${data.model.version != null ? `model V${data.model.version}` : "the deployed model"}`} />
           </div>
           <Table head={["Parameter", "Value"]}>
             {[
@@ -2033,7 +2038,7 @@ function LiveStreamPage() {
         <PageHeader title="Live Stream" sub="Kafka processor: early warnings, block verdicts and storage decisions as logs arrive" />
         {statusError.status === 404 ? (
           <Card style={{ textAlign: "center", padding: "40px 20px" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>No stream processor has reported yet</div>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>No {sourceLabel(source)} stream run yet</div>
             <div style={{ color: C.textFaint, fontSize: 12.5 }}>{statusError.message} See docs/streaming_guide.md for the full start-up sequence.</div>
           </Card>
         ) : <PageError message={statusError.message} />}
