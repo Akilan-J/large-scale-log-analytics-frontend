@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { apiGet, apiPost, apiUpload } from "./api.js";
+import React, { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
+import { apiDelete, apiDownload, apiGet, apiPost, apiUpload } from "./api.js";
 import {
   LayoutDashboard, Database, ShieldAlert, BarChart3, GitBranch, Settings,
   Search, Bell, ChevronLeft, Plus, RefreshCw, UploadCloud, Download,
@@ -64,6 +64,17 @@ export function useSystemTheme() {
 const ACTIVITY_TONE = { anomaly: C.danger, promotion: C.success, rejection: C.warning, rollback: C.warning, refit: C.primary };
 
 // Maps the connector icon names the backend returns onto lucide components.
+// Connector status from /api/sources/connectors: what works now, what can be
+// started, and what is future work (with the reason in its detail line).
+const CONNECTOR_BADGE = {
+  active: { tone: "success", label: "Active" },
+  live: { tone: "success", label: "Live" },
+  idle: { tone: "primary", label: "Idle" },
+  available: { tone: "primary", label: "Available" },
+  unknown: { tone: "warning", label: "Unknown" },
+  future: { tone: "neutral", label: "Future work" },
+};
+
 const CONNECTOR_ICONS = {
   Database, Cloud, Server, Waypoints, ListTree, FileText,
 };
@@ -122,8 +133,32 @@ function bold(text) {
   );
 }
 
+// Which log source every source-aware page shows. Remembered per browser.
+export const SOURCES = [
+  { value: "hdfs", label: "HDFS" },
+  { value: "openstack", label: "OpenStack" },
+  { value: "apache", label: "Apache" },
+  { value: "cloudtrail", label: "CloudTrail" },
+  { value: "django", label: "Django" },
+];
+const SOURCE_KEY = "mg_source";
+// Pages that read ?source=; the others (uploads, settings) ignore it.
+const SOURCE_PAGES = new Set(["dashboard", "detection", "analytics", "storage", "stream", "models"]);
+const SourceCtx = createContext({ source: "hdfs", setSource: () => {} });
+function useSource() { return useContext(SourceCtx).source; }
+function sourceLabel(value) { return SOURCES.find((s) => s.value === value)?.label || value; }
+
+function readStoredSource() {
+  try {
+    const stored = localStorage.getItem(SOURCE_KEY);
+    return SOURCES.some((s) => s.value === stored) ? stored : "hdfs";
+  } catch {
+    return "hdfs";
+  }
+}
+
 function useApiData(fetcher, deps) {
-  const [state, setState] = useState({ data: null, loading: true, error: null });
+  const [state, setState] = useState({ data: null, loading: true, error: null, status: null });
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
@@ -131,8 +166,8 @@ function useApiData(fetcher, deps) {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
     fetcherRef.current()
-      .then((data) => { if (!cancelled) setState({ data, loading: false, error: null }); })
-      .catch((err) => { if (!cancelled) setState({ data: null, loading: false, error: err.message || "Failed to load." }); });
+      .then((data) => { if (!cancelled) setState({ data, loading: false, error: null, status: 200 }); })
+      .catch((err) => { if (!cancelled) setState({ data: null, loading: false, error: err.message || "Failed to load.", status: err.status ?? null }); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
@@ -140,11 +175,29 @@ function useApiData(fetcher, deps) {
   return state;
 }
 
+// Says what kind of labels a non-HDFS source has, next to its metrics, so a
+// rule-based or synthetic F1 is never read as ground truth.
+function SourceBadge({ info }) {
+  if (!info || info.name === "hdfs") return null;
+  const tone = info.label_kind === "ground truth" ? "success" : "warning";
+  return <Badge tone={tone}>{info.title} · {info.label_kind} labels</Badge>;
+}
+
 function PageLoading() {
   return <div style={{ padding: "60px 0", textAlign: "center", color: C.textFaint, fontSize: 13 }}>Loading…</div>;
 }
 
-function PageError({ message }) {
+function PageError({ message, status }) {
+  // 404 from a ?source= endpoint means that source's data isn't on this
+  // server, which is a setup step, not a failure.
+  if (status === 404) {
+    return (
+      <Card style={{ textAlign: "center", padding: "32px 20px" }}>
+        <div style={{ color: C.warning, fontWeight: 600, marginBottom: 6 }}>Not available on this server yet</div>
+        <div style={{ color: C.textMd, fontSize: 12.5, maxWidth: 640, margin: "0 auto", lineHeight: 1.6 }}>{message}</div>
+      </Card>
+    );
+  }
   return (
     <Card style={{ textAlign: "center", padding: "32px 20px" }}>
       <div style={{ color: C.danger, fontWeight: 600, marginBottom: 4 }}>Couldn't load this page</div>
@@ -445,7 +498,54 @@ function Sidebar({ active, setActive, expanded, setExpanded }) {
   );
 }
 
-function Topbar({ pageTitle }) {
+function SourcePicker() {
+  const { source, setSource } = useContext(SourceCtx);
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.textFaint }}>
+      Log source
+      <select
+        value={source}
+        onChange={(e) => setSource(e.target.value)}
+        aria-label="Log source"
+        style={{
+          background: C.card, color: C.textHi, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: "7px 10px", fontSize: 13, fontFamily: C.sans, cursor: "pointer",
+        }}
+      >
+        {SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// Real stream state (it used to be a fixed green "Ingestion Live"): polls the
+// newest processor run and says Live only while one is reporting.
+function StreamBadge() {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => apiGet("/api/stream/status")
+      .then((s) => { if (!cancelled) setState(s.live ? { live: true, source: s.source || "hdfs", rate: s.events_per_sec } : { live: false }); })
+      .catch(() => { if (!cancelled) setState({ live: false }); });
+    poll();
+    const timer = setInterval(poll, 10000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+  const live = state?.live;
+  return (
+    <div title={live ? `${sourceLabel(state.source)} stream, ${Math.round(state.rate || 0).toLocaleString("en-US")} events/s` : "No stream processor is running"}
+      style={{
+        display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
+        color: live ? C.success : C.textFaint, background: live ? C.successDim : C.card,
+        border: `1px solid ${live ? "rgba(16,185,129,0.25)" : C.border}`, padding: "6px 12px", borderRadius: 20,
+      }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: live ? C.success : C.textFaint, display: "inline-block" }} />
+      {live ? `Stream live · ${sourceLabel(state.source)}` : "Stream idle"}
+    </div>
+  );
+}
+
+function Topbar({ pageTitle, showSource }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const initials = initialsOf(currentUser());
 
@@ -463,18 +563,8 @@ function Topbar({ pageTitle }) {
     }}>
       <div style={{ fontSize: 15, fontWeight: 600, color: C.textHi }}>{pageTitle}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <SearchBox value="" onChange={() => {}} placeholder="Search logs, events, models..." width={260} />
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: C.success,
-          background: C.successDim, border: "1px solid rgba(16,185,129,0.25)", padding: "6px 12px", borderRadius: 20,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.success, display: "inline-block" }} />
-          Ingestion Live
-        </div>
-        <div style={{ width: 36, height: 36, borderRadius: 8, background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: C.textMd, position: "relative" }}>
-          <Bell size={17} />
-          <span style={{ position: "absolute", top: 7, right: 7, width: 7, height: 7, borderRadius: "50%", background: C.danger, boxShadow: `0 0 0 2px ${C.card}` }} />
-        </div>
+        {showSource && <SourcePicker />}
+        <StreamBadge />
         <div style={{ position: "relative" }}>
           <div
             onClick={() => setMenuOpen((v) => !v)}
@@ -504,6 +594,38 @@ function Topbar({ pageTitle }) {
   );
 }
 
+function blockNoun(info, plural = false) {
+  const noun = info?.block_noun || "block";
+  const word = plural ? (noun.endsWith("s") ? noun : `${noun}s`) : noun;
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+// E1: the deployed model's real state from /api/dashboard (healthy, degraded,
+// unverified or unavailable), not a fixed "Healthy" badge.
+const STATUS_ICON = { success: CheckCircle2, warning: AlertTriangle, danger: AlertTriangle };
+const STATUS_BG = { success: C.successDim, warning: C.warningDim, danger: C.dangerDim };
+function ModelStatusCard({ status, fpRate }) {
+  const tone = status?.tone || "warning";
+  const Icon = STATUS_ICON[tone] || AlertTriangle;
+  const state = status?.state || "unknown";
+  return (
+    <Card hoverable>
+      <div style={{ width: 36, height: 36, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, background: STATUS_BG[tone] || C.warningDim, color: C[tone] || C.warning }}>
+        <Icon size={18} />
+      </div>
+      <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Model Status</div>
+      <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+        {state === "unavailable" ? "Offline" : "Active"}
+        <Badge tone={tone} dot={tone === "success"}>{state.charAt(0).toUpperCase() + state.slice(1)}</Badge>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }} title={status?.detail}>
+        {status?.detail || "No status reported."}
+        {fpRate != null && ` · ${fpRate.toFixed(2)}% false positives`}
+      </div>
+    </Card>
+  );
+}
+
 function DashboardPage({ onNavigate }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [job, setJob] = useState(null);
@@ -513,8 +635,9 @@ function DashboardPage({ onNavigate }) {
   // to the full deployed dataset.
   const [scope, setScope] = useState("auto");
 
-  const { data, loading, error } = useApiData(
-    () => apiGet("/api/dashboard", scope === "dataset" ? { scope: "dataset" } : {}),
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(
+    () => apiGet("/api/dashboard", { source, ...(scope === "dataset" ? { scope: "dataset" } : {}) }),
     [refreshKey, scope]
   );
 
@@ -552,7 +675,7 @@ function DashboardPage({ onNavigate }) {
   async function startScan() {
     setConfirmOpen(false);
     try {
-      const { job_id } = await apiPost("/api/models/retrain");
+      const { job_id } = await apiPost(`/api/models/retrain?source=${source}`);
       setJob({ state: "running", started_at: new Date().toISOString(), job_id, result: null, error: null });
     } catch (err) {
       setToast({ title: "Couldn't start detection scan", sub: err.message });
@@ -561,7 +684,7 @@ function DashboardPage({ onNavigate }) {
   }
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const { kpis, volume_by_day, severity_mix, model_evolution, recent_activity, date_range, view } = data;
   const onUpload = view?.mode === "upload";
@@ -570,12 +693,13 @@ function DashboardPage({ onNavigate }) {
     <div>
       <PageHeader
         title="Overview"
-        badge={onUpload
-          ? <Badge tone="warning">Uploaded File</Badge>
-          : <Badge tone="primary">Full Dataset</Badge>}
+        badge={<>
+          {onUpload ? <Badge tone="warning">Uploaded File</Badge> : <Badge tone="primary">Full Dataset</Badge>}
+          <SourceBadge info={data.source} />
+        </>}
         sub={onUpload
           ? `Detection results for ${view.upload.name} — ${kpis.total_blocks_analyzed.toLocaleString("en-US")} blocks from ${kpis.total_logs_processed.toLocaleString("en-US")} log lines (${formatDateRange(date_range)})`
-          : `Isolation Forest anomaly detection over the HDFS log trace (${formatDateRange(date_range)})`}
+          : `Isolation Forest anomaly detection over the ${data.source?.title || "HDFS"} logs, one row per ${data.source?.block_noun || "block"} (${formatDateRange(date_range)})`}
         right={<>
           {onUpload
             ? <Button size="sm" onClick={() => setScope("dataset")}>View Full Dataset</Button>
@@ -598,20 +722,11 @@ function DashboardPage({ onNavigate }) {
           <div style={{ fontFamily: C.mono, fontSize: 28, fontWeight: 600, letterSpacing: "-.5px" }}>V{kpis.current_version}</div>
           <LineageMini />
         </Card>
-        <Card hoverable>
-          <div style={{ width: 36, height: 36, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, background: C.successDim, color: C.success }}>
-            <CheckCircle2 size={18} />
-          </div>
-          <div style={{ fontSize: 12, color: C.textLo, fontWeight: 500, marginBottom: 6 }}>Model Status</div>
-          <div style={{ fontSize: 20, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Active <Badge tone="success" dot>Healthy</Badge></div>
-          <div style={{ marginTop: 10, fontSize: 12, color: C.textFaint }}>
-            {kpis.false_positive_rate_pct != null ? `${kpis.false_positive_rate_pct.toFixed(2)}% false positive rate` : "Serving all traffic"}
-          </div>
-        </Card>
+        <ModelStatusCard status={kpis.model_status} fpRate={kpis.false_positive_rate_pct} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
-        <ChartCard title="Log Volume & Anomalies — by Day" meta={formatDateRange(date_range)}>
+        <ChartCard title={`${blockNoun(data.source, true)} & Anomalies — by Day`} meta={`${formatDateRange(date_range)} · anomalies on the right axis`}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={volume_by_day} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
               <CartesianGrid stroke={C.borderSoft} vertical={false} />
@@ -620,8 +735,10 @@ function DashboardPage({ onNavigate }) {
               <YAxis yAxisId="right" orientation="right" tick={{ fill: C.textFaint, fontSize: 10, fontFamily: C.mono }} axisLine={false} tickLine={false} />
               <Tooltip {...tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 11, fontFamily: C.sans }} />
-              <Bar yAxisId="left" dataKey="logs" name="Log events" fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
-              <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalies" stroke={C.danger} strokeWidth={2} dot={{ r: 4, fill: C.danger }} activeDot={{ r: 6 }} />
+              {/* Blocks and anomalous blocks share a unit; raw log lines (a different one) stay in the tooltip. */}
+              <Bar yAxisId="left" dataKey="blocks" name={blockNoun(data.source, true)} fill="rgba(59,130,246,0.55)" radius={[4,4,0,0]} />
+              <Line yAxisId="left" dataKey="logs" name="Log lines" stroke="transparent" dot={false} activeDot={false} legendType="none" />
+              <Line yAxisId="right" type="monotone" dataKey="anomalies" name="Anomalous" stroke={C.danger} strokeWidth={2} dot={{ r: 4, fill: C.danger }} activeDot={{ r: 6 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -716,7 +833,8 @@ function formatDuration(seconds) {
 // Held-out early-warning results per prefix length k (/api/early-warning/summary).
 // Fetched on its own so a missing report only empties this card, not the dashboard.
 function EarlyWarningCard() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/early-warning/summary"), []);
+  const source = useSource();
+  const { data, loading, error } = useApiData(() => apiGet("/api/early-warning/summary", { source }), []);
   const bestK = data?.trade_off_in_progress?.best_k ?? data?.trade_off?.best_k;
   return (
     <Card padded={false} style={{ marginTop: 18 }}>
@@ -925,35 +1043,26 @@ function SourcesPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Supported Sources" meta="Future-ready connectors" />
+          <CardHeader title="Connectors" meta="Live status from the server" />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
             {connectors.map((c) => {
               const Icon = CONNECTOR_ICONS[c.icon] || Database;
+              const badge = CONNECTOR_BADGE[c.status] || CONNECTOR_BADGE.future;
               return (
-                <div key={c.name} style={{
-                  display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", border: `1px solid ${C.border}`,
-                  borderRadius: 8, background: C.bgRaised, opacity: c.enabled ? 1 : 0.45,
+                <div key={c.name} title={c.detail} style={{
+                  display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 16px", border: `1px solid ${C.border}`,
+                  borderRadius: 8, background: C.bgRaised, opacity: c.status === "future" ? 0.6 : 1,
                 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: c.enabled ? C.primaryDim : C.bg, color: c.enabled ? C.primary : C.textFaint }}>
                     <Icon size={18} />
                   </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: c.enabled ? C.textHi : C.textMd }}>{c.name}</div>
-                    <div style={{ fontSize: 11.5, color: C.textFaint }}>{c.enabled ? "Active" : "Not connected"}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: c.enabled ? C.textHi : C.textMd }}>{c.name}</div>
+                      <Badge tone={badge.tone} dot={c.status === "live" || c.status === "active"}>{badge.label}</Badge>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 4, lineHeight: 1.45, wordBreak: "break-word" }}>{c.detail}</div>
                   </div>
-                  {c.enabled
-                    ? <Badge tone="success" dot>Enabled</Badge>
-                    : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        style={{ marginLeft: "auto" }}
-                        disabled
-                        title={`${c.name} isn't implemented yet — coming soon`}
-                      >
-                        Coming soon
-                      </Button>
-                    )}
                 </div>
               );
             })}
@@ -1092,6 +1201,27 @@ function UploadDetectionsModal({ upload, onClose }) {
   );
 }
 
+// Confirm an alert as a real anomaly or mark it a false alarm; clicking the
+// active verdict again withdraws it.
+function VerdictButtons({ blockId, verdict, onChange }) {
+  const button = (value, label, tone, title) => {
+    const active = verdict === value;
+    return (
+      <button type="button" title={title} onClick={() => onChange(blockId, active ? null : value)} style={{
+        fontSize: 11.5, fontWeight: 600, padding: "3px 8px", borderRadius: 6, cursor: "pointer", fontFamily: C.sans,
+        border: `1px solid ${active ? C[tone] : C.border}`, background: active ? C[`${tone}Dim`] : "transparent",
+        color: active ? C[tone] : C.textFaint,
+      }}>{label}</button>
+    );
+  };
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      {button("anomaly", "Real", "danger", "Confirm: this is a real anomaly")}
+      {button("normal", "False alarm", "success", "Mark as normal (false alarm)")}
+    </div>
+  );
+}
+
 function DetectionPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -1104,9 +1234,26 @@ function DetectionPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: summary } = useApiData(() => apiGet("/api/detections/summary"), []);
-  const { data, loading, error } = useApiData(
-    () => apiGet("/api/detections", { search: debouncedSearch, severity: sev, page, limit }),
+  const source = useSource();
+  const { data: summary } = useApiData(() => apiGet("/api/detections/summary", { source }), []);
+  // D2: analysts' verdicts, fed into this source's next retrain.
+  const [verdicts, setVerdicts] = useState({});
+  useEffect(() => {
+    apiGet("/api/feedback", { source }).then((r) => setVerdicts(r.by_block || {})).catch(() => {});
+  }, [source]);
+  async function setVerdict(blockId, verdict) {
+    const previous = verdicts[blockId];
+    setVerdicts((v) => ({ ...v, [blockId]: verdict }));
+    try {
+      if (verdict) await apiPost(`/api/feedback?source=${source}`, { block_id: blockId, verdict });
+      else await apiDelete("/api/feedback", { source, block_id: blockId });
+    } catch (err) {
+      setVerdicts((v) => ({ ...v, [blockId]: previous }));
+      alert(err.message);
+    }
+  }
+  const { data, loading, error, status } = useApiData(
+    () => apiGet("/api/detections", { source, search: debouncedSearch, severity: sev, page, limit }),
     [debouncedSearch, sev, page]
   );
 
@@ -1115,9 +1262,11 @@ function DetectionPage() {
   return (
     <div>
       <PageHeader title="Detection Results"
-        badge={<Badge tone="primary">All Ingested Data</Badge>}
-        sub="Block-level anomaly classification from the currently deployed Isolation Forest model — the base dataset plus every block ingested through Log Sources"
-        right={<Button size="sm" icon={Download}>Export CSV</Button>} />
+        badge={<><Badge tone="primary">{source === "hdfs" ? "All Ingested Data" : sourceLabel(source)}</Badge><SourceBadge info={summary?.source} /></>}
+        sub={source === "hdfs"
+          ? "Block-level anomaly classification from the currently deployed Isolation Forest model — the base dataset plus every block ingested through Log Sources"
+          : `Anomaly classification per ${summary?.source?.block_noun || "block"} from ${sourceLabel(source)}'s deployed Isolation Forest model`}
+        right={<Button size="sm" icon={Download} onClick={() => apiDownload("/api/detections/export", { source, severity: sev, search: debouncedSearch }, `${source}_detections.csv`).catch((e) => alert(e.message))}>Export CSV</Button>} />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
         <KpiCard label="Total Blocks Analyzed" value={summary ? summary.total_analyzed.toLocaleString("en-US") : "—"} />
@@ -1140,8 +1289,10 @@ function DetectionPage() {
             />
           </div>
         </div>
-        {error && <div style={{ padding: "0 22px 16px", color: C.danger, fontSize: 13 }}>{error}</div>}
-        <Table head={["Timestamp", "Block ID", "Component", "Event Type", "Anomaly Score", "Severity", "Source IP"]}>
+        {error && (status === 404
+          ? <div style={{ padding: "0 22px 16px" }}><PageError message={error} status={404} /></div>
+          : <div style={{ padding: "0 22px 16px", color: C.danger, fontSize: 13 }}>{error}</div>)}
+        <Table head={["Timestamp", "Block ID", "Component", "Event Type", "Anomaly Score", "Severity", "Source IP", "Analyst verdict"]}>
           {(data?.items || []).map((e) => (
             <Row key={e.block_id}>
               <Td mono>{formatTimestamp(e.timestamp)}</Td>
@@ -1151,6 +1302,7 @@ function DetectionPage() {
               <Td mono>{e.anomaly_score.toFixed(4)}</Td>
               <Td>{e.severity === "normal" ? <Badge tone="neutral">normal</Badge> : <Badge tone={SEVERITY_TONE[e.severity]} dot>{e.severity}</Badge>}</Td>
               <Td mono>{e.source_ip}</Td>
+              <Td><VerdictButtons blockId={e.block_id} verdict={verdicts[e.block_id]} onChange={setVerdict} /></Td>
             </Row>
           ))}
           {!loading && data && data.items.length === 0 && (
@@ -1176,10 +1328,11 @@ function DetectionPage() {
 }
 
 function AnalyticsPage() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/analytics"), []);
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(() => apiGet("/api/analytics", { source }), []);
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const {
     component_distribution, event_type_distribution, log_level_distribution,
@@ -1189,7 +1342,8 @@ function AnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="Analytics" sub={`Real distributions from the HDFS log trace (${formatDateRange(date_range)})`} />
+      <PageHeader title="Analytics" badge={<SourceBadge info={data.source} />}
+        sub={`Real distributions from the ${data.source?.title || "HDFS"} logs (${formatDateRange(date_range)})`} />
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 18, marginBottom: 18 }}>
         <ChartCard title="Anomalies Detected — by Day" meta={formatDateRange(date_range)}>
@@ -1295,7 +1449,8 @@ function ModelsPage() {
   const [job, setJob] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const { data, loading, error } = useApiData(() => apiGet("/api/models"), [refreshKey]);
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(() => apiGet("/api/models", { source }), [refreshKey]);
 
   useEffect(() => {
     if (data?.job && !job) setJob(data.job);
@@ -1329,7 +1484,7 @@ function ModelsPage() {
   async function startRetrain() {
     setModalOpen(false);
     try {
-      const { job_id } = await apiPost("/api/models/retrain");
+      const { job_id } = await apiPost(`/api/models/retrain?source=${source}`);
       setJob({ state: "running", started_at: new Date().toISOString(), job_id, result: null, error: null });
     } catch (err) {
       setToast({ title: "Couldn't start retrain", sub: err.message });
@@ -1338,7 +1493,7 @@ function ModelsPage() {
   }
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const { current, history_table, timeline } = data;
   const isRunning = job?.state === "running";
@@ -1350,8 +1505,12 @@ function ModelsPage() {
 
   return (
     <div>
-      <PageHeader title="Model Management" sub="Retrains via genetic-algorithm optimization and promotes a candidate only if it beats the currently deployed model"
+      <PageHeader title="Model Management" badge={<SourceBadge info={data.source} />}
+        sub={`${data.source?.title || "HDFS"}: retrains via genetic-algorithm optimization and promotes a candidate only if it beats the currently deployed model`}
         right={<Button variant="primary" size="sm" onClick={() => setModalOpen(true)} disabled={isRunning}>{isRunning ? "Retrain running…" : "Run Retrain Cycle"}</Button>} />
+
+      <FeedbackNote source={source} job={job} />
+      {data.evaluation && <HeldOutCard evaluation={data.evaluation} source={data.source} />}
 
       <Card style={{ padding: "28px 26px 20px", marginBottom: 18 }}>
         <CardHeader title="Model Evolution Lineage" right={<Badge tone="primary">{history_table.length} version{history_table.length === 1 ? "" : "s"}</Badge>} />
@@ -1463,6 +1622,77 @@ function ModelsPage() {
   );
 }
 
+// Held-out numbers for the deployed model and every caveat on its labels.
+// OpenStack shows both label views side by side (B5): F1 against the by-run
+// labels, and how many of the dataset's documented faulty instances it catches.
+// D2: how many analyst verdicts the next retrain will apply, and what the
+// last one actually applied.
+function FeedbackNote({ source, job }) {
+  const [counts, setCounts] = useState(null);
+  useEffect(() => {
+    apiGet("/api/feedback", { source }).then((r) => setCounts(r.counts)).catch(() => setCounts(null));
+  }, [source, job?.state]);
+  const used = job?.feedback;
+  if (!counts && !used) return null;
+  return (
+    <Card style={{ marginBottom: 18, padding: "14px 20px" }}>
+      <div style={{ fontSize: 12.5, color: C.textMd }}>
+        <strong style={{ color: C.textHi }}>Analyst feedback:</strong>{" "}
+        {counts ? `${counts.anomaly} confirmed anomal${counts.anomaly === 1 ? "y" : "ies"}, ${counts.normal} false alarm${counts.normal === 1 ? "" : "s"}` : "unavailable"}
+        {" "}— mark alerts on Detection Results; the next retrain trains and evaluates on the corrected labels and re-scores the live model on them too.
+        {used && used.applied > 0 && ` Last retrain applied ${used.applied} verdict${used.applied === 1 ? "" : "s"} (${used.changed} changed a label).`}
+      </div>
+    </Card>
+  );
+}
+
+function HeldOutCard({ evaluation: ev, source }) {
+  const f = (v) => (v == null ? "—" : v.toFixed(4));
+  const stability = ev.stability?.versions;
+  const gt = ev.ground_truth_check;
+  return (
+    <Card style={{ marginBottom: 18 }}>
+      <CardHeader title="Held-out Evaluation" meta={ev.protocol || ""}
+        right={source?.name !== "hdfs" && <Badge tone="warning">{ev.label_kind || source?.label_kind} labels</Badge>} />
+      <div style={{ display: "grid", gridTemplateColumns: gt ? "repeat(4,1fr)" : "repeat(3,1fr)", gap: 18, marginTop: 6 }}>
+        <MetricBlock label="Deployed model · test F1" value={f(ev.deployed_test_f1)} color={C.success} />
+        {ev.v1_test_f1 != null
+          ? <MetricBlock label="V1 baseline · test F1" value={f(ev.v1_test_f1)} />
+          : stability && <MetricBlock label="Test F1 over 5 splits" value={`${stability.V2?.test_f1_mean?.toFixed(3) ?? "—"} ± ${stability.V2?.test_f1_std?.toFixed(3) ?? "—"}`} />}
+        <MetricBlock label="Test set" value={ev.test_blocks != null ? `${ev.test_blocks.toLocaleString("en-US")} (${(ev.test_anomalies ?? 0).toLocaleString("en-US")} anomalous)` : "—"} small />
+        {gt && <MetricBlock label="Documented faulty instances" value={gt.caught} color={C.warning} small />}
+      </div>
+      {ev.deployed_caught && <div style={{ fontSize: 12.5, color: C.textMd, marginTop: 12 }}>Deployed model {ev.deployed_caught} held-out anomalies{ev.v1_caught ? ` (V1 ${ev.v1_caught.replace("caught ", "")})` : ""}.</div>}
+      {gt?.note && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>{gt.note}</div>}
+      {ev.label_description && <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>Labels: {ev.label_description}</div>}
+      {ev.model_comparison && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textHi, marginBottom: 4 }}>Why Isolation Forest — compared with an Autoencoder</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 8 }}>
+            Same held-out splits (seeds {ev.model_comparison.seeds.join(", ")}), same alert rate as the deployed model.
+          </div>
+          <Table head={["Detector", "Test F1", "ROC AUC", "F1 at best threshold", "Fit time"]}>
+            {ev.model_comparison.rows.map((r) => (
+              <Row key={r.detector}>
+                <Td title>{r.detector}</Td>
+                <Td mono>{r.f1_at_deployed_alert_rate.toFixed(3)} ± {r.f1_std.toFixed(3)}</Td>
+                <Td mono>{r.roc_auc_test.toFixed(3)}</Td>
+                <Td mono>{r.f1_at_train_best_f1_threshold.toFixed(3)}</Td>
+                <Td mono>{r.fit_seconds.toFixed(1)} s</Td>
+              </Row>
+            ))}
+          </Table>
+        </div>
+      )}
+      {(ev.warnings || []).map((w) => (
+        <div key={w} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: C.warning, marginTop: 8 }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} /> <span>{w}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function GenNode({ tone, label, version, acc, status }) {
   const dotStyles = {
     retired: { border: "#2A3644", bg: C.bgRaised },
@@ -1543,11 +1773,14 @@ function policyParams(policy, config) {
     ...(config.warm_ref_fraction != null && { warm_ref_fraction: config.warm_ref_fraction }),
     weights: { ...policy.weights },
     split: "holdout",
+    // The Settings page's saved target, else the policy's own.
+    ...(readRetentionTarget() != null && { retention_target: readRetentionTarget() }),
   };
 }
 
 function SmartStoragePage() {
-  const { data, loading, error } = useApiData(() => apiGet("/api/storage/summary"), []);
+  const source = useSource();
+  const { data, loading, error, status } = useApiData(() => apiGet("/api/storage/summary", { source }), []);
   const [params, setParams] = useState(null);
   const [sim, setSim] = useState(null);
   const [simError, setSimError] = useState(null);
@@ -1564,7 +1797,7 @@ function SmartStoragePage() {
     setSimBusy(true);
     const timer = setTimeout(async () => {
       try {
-        const result = await apiPost("/api/storage/simulate", params);
+        const result = await apiPost(`/api/storage/simulate?source=${source}`, params);
         if (!cancelled) { setSim(result); setSimError(null); }
       } catch (err) {
         if (!cancelled) setSimError(err.message);
@@ -1590,7 +1823,7 @@ function SmartStoragePage() {
   })), [data]);
 
   if (loading) return <PageLoading />;
-  if (error) return <PageError message={error} />;
+  if (error) return <PageError message={error} status={status} />;
 
   const h = data.holdout;
   const target = data.config.retention_target;
@@ -1609,7 +1842,7 @@ function SmartStoragePage() {
     <div>
       <PageHeader
         title="Smart Storage"
-        badge={data.stale ? <Badge tone="warning">Stale — re-run the optimizer</Badge> : <Badge tone="primary">Held-out Blocks</Badge>}
+        badge={<>{data.stale ? <Badge tone="warning">Stale — re-run the optimizer</Badge> : <Badge tone="primary">Held-out Blocks</Badge>}<SourceBadge info={data.source} /></>}
         sub={`GA-tuned retention policy, tuned on ${data.split.tune.blocks.toLocaleString("en-US")} blocks and measured on ${data.split.holdout.blocks.toLocaleString("en-US")} held-out ones`}
       />
 
@@ -1752,6 +1985,7 @@ const ALERTS_POLL_MS = 4000;
 const RATE_HISTORY = 60;
 
 function LiveStreamPage() {
+  const source = useSource();
   const [status, setStatus] = useState(null);
   const [statusError, setStatusError] = useState(null);
   const [series, setSeries] = useState([]);
@@ -1762,7 +1996,7 @@ function LiveStreamPage() {
     let cancelled = false;
     async function tick() {
       try {
-        const s = await apiGet("/api/stream/status");
+        const s = await apiGet("/api/stream/status", { source });
         if (cancelled) return;
         setStatus(s);
         setStatusError(null);
@@ -1781,7 +2015,7 @@ function LiveStreamPage() {
     let cancelled = false;
     async function tick() {
       try {
-        const data = await apiGet("/api/stream/alerts", { limit: 50, type: alertType === "all" ? undefined : alertType });
+        const data = await apiGet("/api/stream/alerts", { source, limit: 50, type: alertType === "all" ? undefined : alertType });
         if (!cancelled) setAlerts(data);
       } catch {
         // keep the last good list; the status card already reports outages
@@ -1911,15 +2145,128 @@ function LiveStreamPage() {
   );
 }
 
+const RETENTION_KEY = "mg_retention_target";
+
+function readRetentionTarget() {
+  try {
+    const value = parseFloat(localStorage.getItem(RETENTION_KEY));
+    return value >= 0.5 && value <= 1 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function Field({ label, children, hint }) {
+  return (
+    <label style={{ display: "block", marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: C.textLo, marginBottom: 6, fontWeight: 500 }}>{label}</div>
+      {children}
+      {hint && <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 5 }}>{hint}</div>}
+    </label>
+  );
+}
+
+const inputStyle = {
+  width: "100%", background: C.bgRaised, color: C.textHi, border: `1px solid ${C.border}`, borderRadius: 8,
+  padding: "9px 12px", fontSize: 13, fontFamily: C.sans,
+};
+
 function SettingsPage() {
+  const { source, setSource } = useContext(SourceCtx);
+  const { data: me, error: meError } = useApiData(() => apiGet("/api/auth/me"), []);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [pwState, setPwState] = useState(null); // { ok, message }
+  const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState(() => readRetentionTarget() ?? 0.95);
+  const [saved, setSaved] = useState(false);
+
+  async function changePassword(e) {
+    e.preventDefault();
+    if (next !== confirm) { setPwState({ ok: false, message: "The new passwords don't match." }); return; }
+    setBusy(true);
+    try {
+      await apiPost("/api/auth/change-password", { current_password: current, new_password: next });
+      setPwState({ ok: true, message: "Password changed." });
+      setCurrent(""); setNext(""); setConfirm("");
+    } catch (err) {
+      setPwState({ ok: false, message: err.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function saveTarget() {
+    try { localStorage.setItem(RETENTION_KEY, String(target)); } catch {}
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  const user = me || currentUser() || {};
   return (
     <div>
-      <PageHeader title="Settings" sub="Workspace, alerting, and account preferences" />
-      <Card style={{ padding: "48px 20px", textAlign: "center" }}>
-        <Settings size={40} color={C.textFaint} style={{ margin: "0 auto 14px", opacity: 0.5 }} />
-        <div style={{ fontWeight: 600, color: C.textMd }}>Out of scope for this prototype</div>
-        <div style={{ fontSize: 12.5, color: C.textFaint, marginTop: 4 }}>Wired up in the sitemap — see the accompanying design document.</div>
-      </Card>
+      <PageHeader title="Settings" sub="Your account and how the dashboard opens" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        <Card>
+          <CardHeader title="Account" />
+          <Table head={["", ""]}>
+            {[
+              ["Name", user.name || "—"],
+              ["Email", user.email || "—"],
+              ["Member since", me?.created_at ? formatTimestamp(me.created_at) : "—"],
+            ].map(([k, v]) => <Row key={k}><Td title>{k}</Td><Td mono>{v}</Td></Row>)}
+          </Table>
+          {meError && <div style={{ fontSize: 12, color: C.warning, marginTop: 8 }}>{meError}</div>}
+          <div style={{ fontSize: 12, color: C.textFaint, marginTop: 12 }}>
+            Passwords are stored as bcrypt hashes. Sessions last 24 hours.
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="Change Password" />
+          <form onSubmit={changePassword}>
+            <Field label="Current password">
+              <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} style={inputStyle} required />
+            </Field>
+            <Field label="New password" hint="At least 8 characters.">
+              <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} style={inputStyle} minLength={8} required />
+            </Field>
+            <Field label="Confirm new password">
+              <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} required />
+            </Field>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button type="submit" disabled={busy} style={{
+                background: C.primary, color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px",
+                fontSize: 13, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+              }}>{busy ? "Saving…" : "Change password"}</button>
+              {pwState && <span style={{ fontSize: 12.5, color: pwState.ok ? C.success : C.danger }}>{pwState.message}</span>}
+            </div>
+          </form>
+        </Card>
+
+        <Card>
+          <CardHeader title="Default Log Source" />
+          <Field label="Source the data pages open on" hint="Also switchable from the top bar on every data page. Saved in this browser.">
+            <select value={source} onChange={(e) => setSource(e.target.value)} style={inputStyle}>
+              {SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </Field>
+        </Card>
+
+        <Card>
+          <CardHeader title="Smart Storage" />
+          <Field label={`Retention target for the simulator: ${pct(target, 0)}`}
+            hint="The share of anomalies a simulated policy must keep. The tuned policy itself was optimised for 95%.">
+            <input type="range" min={0.8} max={1} step={0.01} value={target} onChange={(e) => setTarget(parseFloat(e.target.value))} style={{ width: "100%" }} />
+          </Field>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Button size="sm" variant="primary" onClick={saveTarget}>Save</Button>
+            {saved && <span style={{ fontSize: 12.5, color: C.success }}>Saved</span>}
+          </div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginTop: 14 }}>Theme follows your system's light or dark setting.</div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -1944,6 +2291,11 @@ export default function MorphGuardApp() {
   useSystemTheme();
   const [page, setPage] = useState("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [source, setSourceState] = useState(readStoredSource);
+  const setSource = (value) => {
+    setSourceState(value);
+    try { localStorage.setItem(SOURCE_KEY, value); } catch {}
+  };
 
   const pages = {
     dashboard: <DashboardPage onNavigate={setPage} />,
@@ -1957,6 +2309,7 @@ export default function MorphGuardApp() {
   };
 
   return (
+    <SourceCtx.Provider value={{ source, setSource }}>
     <div style={{
       display: "flex", minHeight: "100vh", background: C.bg, color: C.textHi, fontFamily: C.sans, fontSize: 14,
     }}>
@@ -1975,11 +2328,13 @@ export default function MorphGuardApp() {
       <Sidebar active={page} setActive={setPage} expanded={sidebarExpanded} setExpanded={setSidebarExpanded} />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <Topbar pageTitle={titles[page]} />
+        <Topbar pageTitle={titles[page]} showSource={SOURCE_PAGES.has(page)} />
         <main style={{ padding: 28, flex: 1 }}>
-          {pages[page]}
+          {/* key: switching source remounts the page, so no state from the previous source leaks across */}
+          <React.Fragment key={SOURCE_PAGES.has(page) ? `${page}:${source}` : page}>{pages[page]}</React.Fragment>
         </main>
       </div>
     </div>
+    </SourceCtx.Provider>
   );
 }
