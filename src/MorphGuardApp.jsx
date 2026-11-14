@@ -1989,6 +1989,15 @@ const STREAM_POLL_MS = 2000;
 const ALERTS_POLL_MS = 4000;
 const RATE_HISTORY = 60;
 
+// 42 -> "42 s", 3700 -> "1 h 1 min", 170011 -> "1 d 23 h" (raw seconds are unreadable once a run is old).
+function formatAge(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  return `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`;
+}
+
 function LiveStreamPage() {
   const source = useSource();
   const [status, setStatus] = useState(null);
@@ -2054,7 +2063,7 @@ function LiveStreamPage() {
       <PageHeader
         title="Live Stream"
         badge={s.live ? <Badge tone="success" dot>Live</Badge> : <Badge tone="neutral">Stopped</Badge>}
-        sub={`Run ${s.run_id} — log time ${formatTimestamp(s.log_time_watermark)}, alerts at k = ${s.ks.join(", ")} events, updated ${s.seconds_since_update}s ago`}
+        sub={`Run ${s.run_id} — log time ${formatTimestamp(s.log_time_watermark)}, alerts at k = ${s.ks.join(", ")} events, updated ${formatAge(s.seconds_since_update)} ago`}
       />
 
       <div className="mg-grid-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 18, marginBottom: 18 }}>
