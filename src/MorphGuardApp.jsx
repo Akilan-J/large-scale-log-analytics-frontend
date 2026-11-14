@@ -1663,7 +1663,7 @@ function HeldOutCard({ evaluation: ev, source }) {
         <MetricBlock label="Deployed model · test F1" value={f(ev.deployed_test_f1)} color={C.success} />
         {ev.v1_test_f1 != null
           ? <MetricBlock label="V1 baseline · test F1" value={f(ev.v1_test_f1)} />
-          : stability && <MetricBlock label="Test F1 over 5 splits" value={`${stability.V2?.test_f1_mean?.toFixed(3) ?? "—"} ± ${stability.V2?.test_f1_std?.toFixed(3) ?? "—"}`} />}
+          : stability && <MetricBlock label="Test F1 over 5 splits" value={`${stability[`V${ev.deployed_version}`]?.test_f1_mean?.toFixed(3) ?? "—"} ± ${stability[`V${ev.deployed_version}`]?.test_f1_std?.toFixed(3) ?? "—"}`} />}
         <MetricBlock label="Test set" value={ev.test_blocks != null ? `${ev.test_blocks.toLocaleString("en-US")} (${(ev.test_anomalies ?? 0).toLocaleString("en-US")} anomalous)` : "—"} small />
         {gt && <MetricBlock label="Documented faulty instances" value={gt.caught} color={C.warning} small />}
       </div>
